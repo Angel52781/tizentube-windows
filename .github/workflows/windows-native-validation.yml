@@ -68,7 +68,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'DOTNET_HOST_BUILD_FAILED' }
           if (!(Test-Path windows-out/TizenTubeHost.exe)) { throw 'NATIVE_HOST_EXE_MISSING' }
 
-          Copy-Item -Path src -Destination windows-out/app -Recurse -Force
+          New-Item -ItemType Directory -Path windows-out/app -Force | Out-Null
+          foreach ($folder in @('mods','ui','runtime','core','extension')) {
+            Copy-Item -Path "src/$folder" -Destination "windows-out/app/$folder" -Recurse -Force
+          }
           $exe = Get-Item windows-out/TizenTubeHost.exe
           if ($exe.Length -lt 10000) { throw 'NATIVE_HOST_EXE_UNEXPECTEDLY_SMALL' }
           $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
@@ -147,7 +150,12 @@ jobs:
           if (!(Test-Path $exe)) { throw 'PORTABLE_HOST_EXE_MISSING' }
           if ((Get-Item $exe).Length -lt 10000000) { throw 'PORTABLE_HOST_NOT_SELF_CONTAINED' }
           if (Test-Path (Join-Path $pkg 'app')) { throw 'PACKAGE_APP_DIR_ALREADY_PRESENT' }
-          Copy-Item -Path src -Destination (Join-Path $pkg 'app') -Recurse -Force
+          $app = Join-Path $pkg 'app'
+          New-Item -ItemType Directory -Path $app -Force | Out-Null
+          foreach ($folder in @('mods','ui','runtime','core','extension')) {
+            Copy-Item -Path "src/$folder" -Destination (Join-Path $app $folder) -Recurse -Force
+          }
+          if (Test-Path (Join-Path $app 'native')) { throw 'BUILD_OUTPUT_LEAKED_INTO_APP_PACKAGE' }
           Copy-Item LICENSE (Join-Path $pkg 'LICENSE')
           Copy-Item docs/GETTING_STARTED_WINDOWS.md (Join-Path $pkg 'LEEME_INSTALACION.md')
           foreach ($required in @('app/mods/tizentube.bundle.js','app/ui/styles.css','app/extension/manifest.json','TizenTubeHost.exe','LICENSE','LEEME_INSTALACION.md')) {
