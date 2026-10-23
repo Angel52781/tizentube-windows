@@ -1,12 +1,14 @@
 # TizenTube Windows
 
-[![Descargar TizenTube Windows — ZIP portable](https://img.shields.io/badge/%E2%AC%87%20DESCARGAR-Windows%2010%2F11%20x64-087fca?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.4/TizenTube-Windows-x64-v0.1.0-preview.4.zip)
+[![Descargar TizenTube Windows — ZIP portable](https://img.shields.io/badge/%E2%AC%87%20DESCARGAR-Windows%2010%2F11%20x64-087fca?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.5/TizenTube-Windows-x64-v0.1.0-preview.5.zip)
 
-**[Descarga directa para Windows (versión de prueba)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.4/TizenTube-Windows-x64-v0.1.0-preview.4.zip)** · [Instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md) · [Todas las versiones](https://github.com/Angel52781/tizentube-windows/releases)
+**[Descarga directa para Windows (versión de prueba)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.5/TizenTube-Windows-x64-v0.1.0-preview.5.zip)** · [Instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md) · [Todas las versiones](https://github.com/Angel52781/tizentube-windows/releases)
 
 > **¿Windows muestra «Windows protegió su PC»?** Esta versión de prueba todavía no tiene firma digital de un editor reconocido. Consulta [por qué sucede y las opciones de firma](docs/SMARTSCREEN_AND_SIGNING.md). No implica por sí mismo que el archivo sea malicioso; verifica siempre el origen y el SHA-256.
 
-**Descarga para probar en Windows 10/11 x64:** [Releases / v0.1.0-preview.4](https://github.com/Angel52781/tizentube-windows/releases/tag/v0.1.0-preview.4). Descargar el ZIP de **Assets**, extraer toda la carpeta y ejecutar `TizenTubeHost.exe`. Ver [instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md).
+**Descarga para probar en Windows 10/11 x64:** [Releases / v0.1.0-preview.5](https://github.com/Angel52781/tizentube-windows/releases/tag/v0.1.0-preview.5). Descargar el ZIP de **Assets**, extraer toda la carpeta y ejecutar `TizenTubeHost.exe`. Ver [instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md).
+
+**Preview.5 — auditoría del TizenTube original:** la versión de Android/Chromecast utiliza YouTube TV y Cobalt, mientras que nuestro modo habitual abre YouTube desktop. Se trasladaron semánticas originales de filtrado TV y se añadió `--tv` experimental con perfil separado. Para investigar anuncios de escritorio que continúan apareciendo, `Ctrl+Shift+F10` genera un diagnóstico **local** de la estructura publicitaria, sin registrar cookies ni nombres de cuenta. [Leer auditoría original vs Windows](docs/ORIGINAL_ARCHITECTURE_AUDIT.md). **No afirmar aún paridad ni bloqueo total de publicidad en una cuenta real.**
 
 **Preview.4:** reconocimiento conservador de anuncios patrocinados con etiqueta visible (`Patrocinado`, `Sponsored`, etc.) o URL de clic publicitario en tarjetas de inicio; compatibilidad DPI **Per-Monitor V2** para intentar evitar texto borroso en pantallas escaladas y varios monitores. Se conserva la interfaz de comentarios de YouTube y el inicio de sesión Google. Las pruebas automatizadas no sustituyen la revisión visual de la cuenta del usuario.
 

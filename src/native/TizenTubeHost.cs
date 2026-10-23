@@ -31,6 +31,7 @@ namespace TizenTubeWindows
         public bool StartMinimized { get; set; } = false;
         public bool HeadlessMode { get; set; } = false;
         public bool ShowHelp { get; set; } = false;
+        public bool TvMode { get; set; } = false;
 
         public static HostOptions Parse(string[] args)
         {
@@ -81,6 +82,11 @@ namespace TizenTubeWindows
                 {
                     options.HeadlessMode = true;
                 }
+                else if (arg == "--tv")
+                {
+                    options.TvMode = true;
+                    options.InitialUrl = "https://www.youtube.com/tv";
+                }
                 else if (arg == "--help" || arg == "-h")
                 {
                     options.ShowHelp = true;
@@ -102,6 +108,7 @@ namespace TizenTubeWindows
             Console.WriteLine("  --url <url>           Override initial navigation URL");
             Console.WriteLine("  --minimized           Launch with window initially minimized");
             Console.WriteLine("  --headless            Launch hidden offscreen for CI/automated testing");
+            Console.WriteLine("  --tv                  Experimental YouTube TV UI (Cobalt-like); separate profile");
             Console.WriteLine("  --help, -h            Show this help message");
         }
     }
@@ -189,7 +196,7 @@ namespace TizenTubeWindows
 
             appDataDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "TizenTube", "UserData"
+                "TizenTube", this.options.TvMode ? "TVUserData" : "UserData"
             );
             Directory.CreateDirectory(appDataDir);
 
@@ -280,6 +287,18 @@ namespace TizenTubeWindows
         private void ConfigureWebViewSettings()
         {
             var settings = webView.CoreWebView2.Settings;
+            if (options.TvMode)
+            {
+                // Experimental parity path with reisxd/TizenTubeCobalt. Uses
+                // the TV client and one of the upstream-generated Cobalt UAs.
+                // Do not apply it to desktop browsing or the user's existing
+                // Google session. TV compatibility is not guaranteed.
+                settings.UserAgent = "Mozilla/5.0 (Linux armeabi-v7a; Android 14) " +
+                    "Cobalt/25.lts.30.1034958-gold (unlike Gecko) " +
+                    "v8/8.8.278.17-jit gles Starboard/15, " +
+                    "Google_ATV_sabrina_2020/UTTC.250917.004 (google, Chromecast) " +
+                    "com.google.android.youtube.tv/5.30.301";
+            }
             settings.AreDefaultContextMenusEnabled = true;
             settings.AreDevToolsEnabled = false; // Disabled by default in production to save RAM
             settings.IsStatusBarEnabled = false;
@@ -384,7 +403,28 @@ namespace TizenTubeWindows
                     if (string.IsNullOrEmpty(json)) return;
 
                     // Message dispatching for SponsorBlock skip notifications, memory requests, preferences, etc.
-                    if (json.Contains("sponsorblock:skipped"))
+                    if (json.Contains("\"channel\":\"adblock:diagnostic\""))
+                    {
+                        // User-invoked Ctrl+Shift+F10, scoped to the first-party
+                        // YouTube document. The JS payload is metadata-only;
+                        // never transmit private user session data or upload it.
+                        if (Uri.TryCreate(args.Source, UriKind.Absolute, out Uri sender) &&
+                            sender.Scheme == "https" &&
+                            (sender.Host == "www.youtube.com" || sender.Host == "youtube.com") &&
+                            json.Length <= 16000)
+                        {
+                            string output = Path.Combine(appDataDir, "adblock-diagnostic.json");
+                            File.WriteAllText(output, json);
+                            Console.WriteLine("[Host AdBlock] Local diagnostic saved at: " + output);
+                            if (!options.SmokeTest)
+                                MessageBox.Show(
+                                    "Se guardó un diagnóstico de estructura publicitaria en:\n\n" + output +
+                                    "\n\nSolo contiene tipos de elementos y etiquetas de anuncios; no registra contraseñas, cookies, títulos ni identificadores de vídeos.",
+                                    "TizenTube — diagnóstico local",
+                                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                    }
+                    else if (json.Contains("sponsorblock:skipped"))
                     {
                         Interlocked.Increment(ref sponsorBlockSkipCount);
                         Console.WriteLine("[Host IPC] SponsorBlock segment auto-skipped.");

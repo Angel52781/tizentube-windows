@@ -1,10 +1,10 @@
-# TizenTube Windows — prueba personal (v0.1.0-preview.4)
+# TizenTube Windows — prueba personal (v0.1.0-preview.5)
 
 Este es un **prototipo de escritorio no oficial**, todavía en pruebas. Abre YouTube mediante Microsoft Edge WebView2 en una ventana propia; **no reproduce exactamente la interfaz de la aplicación Android/Chromecast**. La integración real de bloqueo de anuncios, SponsorBlock y DeArrow puede presentar fallos por cambios de YouTube. No se garantiza su funcionamiento en todos los vídeos.
 
 ## Instalación en Windows 10/11 (x64)
 
-1. Descarga `TizenTube-Windows-x64-v0.1.0-preview.4.zip` desde la sección **Assets** de la release de GitHub.
+1. Descarga `TizenTube-Windows-x64-v0.1.0-preview.5.zip` desde la sección **Assets** de la release de GitHub.
 2. Haz clic derecho en el ZIP y elige **Extraer todo**. Es importante extraerlo: no ejecutes el `.exe` directamente dentro del ZIP.
 3. Abre la carpeta `TizenTube-Windows-x64` y haz doble clic en **`TizenTubeHost.exe`**. Es el programa real, compilado en Windows con .NET 8 y WebView2. Deja juntos el ejecutable y la carpeta `app`.
 4. Si Windows SmartScreen avisa que la aplicación no tiene un editor reconocido, se debe a que este prototipo no está firmado digitalmente. Ejecuta únicamente el ZIP descargado de la release oficial del repositorio del proyecto y verifica el SHA-256 publicado antes de decidir si confiar en el archivo.
@@ -14,6 +14,14 @@ No requiere permisos de administrador ni un instalador tradicional para extraer 
 
 ## Primeras pruebas
 
+### Probar la interfaz original de televisión (experimental)
+
+La versión de Windows se inicia normalmente en **YouTube de escritorio**. Para contrastar la interfaz de TizenTube Cobalt/Chromecast, abre PowerShell dentro de la carpeta extraída y ejecuta `.\TizenTubeHost.exe --tv`. Esto solicita YouTube TV con un perfil separado de WebView2; el inicio de sesión y algunas funciones pueden no estar soportados. **No se ha probado todavía la reproducción completa del modo TV.** El modo es experimental y no modifica tu perfil habitual.
+
+### Identificar un anuncio que todavía atraviesa el filtro
+
+Si vuelve a aparecer una tarjeta «Patrocinado» en Inicio, **con la página abierta presiona `Ctrl+Shift+F10`**. La aplicación guardará en tu equipo un archivo `adblock-diagnostic.json` y mostrará su ubicación. Contiene únicamente tipos de elementos y etiquetas de publicidad, sin recopilar títulos de vídeos, comentarios, cookies ni credenciales. Comparte ese archivo solo si lo deseas para que se pueda corregir el formato exacto del anuncio en vez de añadir reglas a ciegas.
+
 - Comprueba que carga YouTube, busca un vídeo, inicia la reproducción, pausa, avanza, cambia volumen, ajusta velocidad y utiliza pantalla completa.
 - Comprueba SponsorBlock con un vídeo que tenga segmentos comunitarios y DeArrow con uno que tenga título/miniatura alternativos. Revisa los interruptores de ajustes.
 - Si aparecen anuncios, indica en qué vídeo ocurrió. **No asumimos que el bloqueador sea infalible**.
@@ -21,7 +29,7 @@ No requiere permisos de administrador ni un instalador tradicional para extraer 
 
 ## Informar fallos
 
-Anota la versión (`v0.1.0-preview.4`), edición de Windows, el enlace del vídeo, qué hiciste, qué esperabas y qué ocurrió. Para evaluar nitidez incluye resolución y escalado de Windows (100 %, 125 %, 150 %, etc.), si usas varios monitores y una captura de los comentarios borrosos sin datos privados. Puedes abrir un issue en [GitHub](https://github.com/Angel52781/tizentube-windows/issues) o describir el fallo directamente al equipo de desarrollo.
+Anota la versión (`v0.1.0-preview.5`), edición de Windows, el enlace del vídeo, qué hiciste, qué esperabas y qué ocurrió. Para evaluar nitidez incluye resolución y escalado de Windows (100 %, 125 %, 150 %, etc.), si usas varios monitores y una captura de los comentarios borrosos sin datos privados. Puedes abrir un issue en [GitHub](https://github.com/Angel52781/tizentube-windows/issues) o describir el fallo directamente al equipo de desarrollo.
 
 ## Estado de validación
 

@@ -174,10 +174,22 @@ jobs:
           Copy-Item $smokePath 'release-out/portable-smoke-evidence.json' -Force
           Remove-Item $smokePath -Force
           Write-Host '[OK] Self-contained portable host and bundled WebView2Loader verified by execution'
+          # Research-only probe. WebView2 != Cobalt; an exit code 0 is not
+          # proof that YouTube TV works or ad-free playback is available.
+          $tvProbe = Join-Path (Resolve-Path $pkg).Path 'experimental-tv-smoke.json'
+          $tv = Start-Process -FilePath (Resolve-Path $exe).Path -WorkingDirectory (Resolve-Path $pkg).Path -ArgumentList @('--tv','--smoke-test','16','--telemetry-file',$tvProbe) -PassThru -Wait
+          if ($tv.ExitCode -ne 0) {
+            Write-Warning "EXPERIMENTAL_TV_MODE_NOT_READY: exit $($tv.ExitCode)"
+          } elseif (Test-Path $tvProbe) {
+            $tvEvidence = Get-Content $tvProbe -Raw -Encoding utf8 | ConvertFrom-Json
+            Write-Host "EXPERIMENTAL_TV_SMOKE_ONLY mods=$($tvEvidence.summary.modsInitializedCount); playback NOT verified"
+            Copy-Item $tvProbe 'release-out/experimental-tv-smoke-evidence.json' -Force
+          }
+          if (Test-Path $tvProbe) { Remove-Item $tvProbe -Force }
           $exeSha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "TizenTubeHost.exe SHA256=$exeSha" | Set-Content (Join-Path $pkg 'CHECKSUMS.txt')
           "Commit=$env:GITHUB_SHA" | Add-Content (Join-Path $pkg 'CHECKSUMS.txt')
-          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.4.zip'
+          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.5.zip'
           Compress-Archive -Path $pkg -DestinationPath $zip -CompressionLevel Optimal -Force
           if (!(Test-Path $zip)) { throw 'PORTABLE_ZIP_MISSING' }
           $zipSha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -191,8 +203,9 @@ jobs:
         with:
           name: tizentube-windows-x64-portable-preview
           path: |
-            release-out/TizenTube-Windows-x64-v0.1.0-preview.4.zip
+            release-out/TizenTube-Windows-x64-v0.1.0-preview.5.zip
             release-out/SHA256SUMS.txt
             release-out/portable-smoke-evidence.json
+            release-out/experimental-tv-smoke-evidence.json
           if-no-files-found: error
           retention-days: 14

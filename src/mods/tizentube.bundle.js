@@ -1492,10 +1492,12 @@ class AdBlockBase {
     this._preAdRate = null;
     this._preAdMuted = null;
     this._origJsonParse = null;
+    this._origJsonStringify = null;
     this._origResponseJson = null;
     this._domReadyListener = null;
     this.sponsoredObserver = null;
     this._sponsoredScanScheduled = false;
+    this._diagnosticKeyHandler = null;
   }
 
   /**
@@ -1504,8 +1506,10 @@ class AdBlockBase {
   install() {
     if (!this.options.enabled || this.isHooked) return;
     this.hookJsonParser();
+    this.hookTvInlinePlayback();
     this.hookFetchResponseJson();
     this.attachDocumentFilters();
+    this.installDiagnosticShortcut();
     this.isHooked = true;
   }
 
@@ -1583,6 +1587,28 @@ class AdBlockBase {
   }
 
   /**
+   * TizenTube TV upstream also patches JSON.stringify so inline playback
+   * requests include isInlinePlaybackNoAd=true. Scope this to /tv only;
+   * modifying desktop InnerTube requests can break ordinary videos.
+   */
+  hookTvInlinePlayback() {
+    if (this._origJsonStringify || typeof JSON === 'undefined') return;
+    const original = JSON.stringify;
+    const self = this;
+    this._origJsonStringify = original;
+    JSON.stringify = function (value, replacer, space) {
+      const tvPage = typeof location !== 'undefined'
+        && /^\/tv(?:\/|$)/.test(location.pathname || '');
+      const context = value?.playbackContext?.contentPlaybackContext;
+      if (tvPage && self.options.enabled && context && !context.isInlinePlaybackNoAd) {
+        value = { ...value, playbackContext: { ...value.playbackContext,
+          contentPlaybackContext: { ...context, isInlinePlaybackNoAd: true } } };
+      }
+      return original.call(this, value, replacer, space);
+    };
+  }
+
+  /**
    * Modern YouTube desktop decodes its /youtubei/v1/player responses with
    * Response.json(), which does not need to call the page's JSON.parse hook.
    * Intercept only YouTube player responses; avoid modifying other sites,
@@ -1619,18 +1645,28 @@ class AdBlockBase {
   cleanAdData(obj) {
     if (!obj || typeof obj !== 'object') return;
 
+    // Original TizenTube (mods/features/adblock.js, f99945a) targets
+    // YouTube TV. It preserves ad fields with empty values instead of
+    // deleting properties. Desktop YouTube has different response contracts;
+    // retain the port's existing behavior there until it is E2E verified.
+    const isTvPayload = Boolean(obj.contents?.tvBrowseRenderer)
+      || (typeof location !== 'undefined' && /^\/tv(?:\/|$)/.test(location.pathname || ''));
+
     if (obj.adPlacements) {
-      delete obj.adPlacements;
+      if (isTvPayload) obj.adPlacements = [];
+      else delete obj.adPlacements;
       this.blockedCount++;
     }
 
     if (obj.playerAds) {
-      delete obj.playerAds;
+      if (isTvPayload) obj.playerAds = false;
+      else delete obj.playerAds;
       this.blockedCount++;
     }
 
     if (obj.adSlots) {
-      delete obj.adSlots;
+      if (isTvPayload) obj.adSlots = [];
+      else delete obj.adSlots;
       this.blockedCount++;
     }
 
@@ -1706,8 +1742,15 @@ class AdBlockBase {
     // Mobile / TV sectionListRenderer
     const tvSections = contents.tvBrowseRenderer?.content?.tvSurfaceContentRenderer?.content?.sectionListRenderer?.contents;
     if (Array.isArray(tvSections)) {
-      contents.tvBrowseRenderer.content.tvSurfaceContentRenderer.content.sectionListRenderer.contents =
-        this.removeSponsoredItems(tvSections);
+      const filtered = this.removeSponsoredItems(tvSections);
+      for (const section of filtered) {
+        // Exact structural analogue of the original TV shelf ad removal.
+        const tiles = section.shelfRenderer?.content?.horizontalListRenderer?.items;
+        if (Array.isArray(tiles)) {
+          section.shelfRenderer.content.horizontalListRenderer.items = this.removeSponsoredItems(tiles);
+        }
+      }
+      contents.tvBrowseRenderer.content.tvSurfaceContentRenderer.content.sectionListRenderer.contents = filtered;
     }
   }
 
@@ -1880,6 +1923,57 @@ class AdBlockBase {
   }
 
   /**
+   * Local, opt-in diagnosis of unrecognized ad DOM structures. The report
+   * includes only element TAG/ID names and recognized ad badges; no cookies,
+   * account names, video IDs, ad URLs, titles, comments or DOM innerHTML.
+   */
+  collectSponsoredDiagnostics() {
+    const data = { schema: 'tizentube.adblock.dom.v1',
+      timestamp: new Date().toISOString(), cards: [], badgeAncestors: [],
+      counts: {} };
+    if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return data;
+
+    const known = ['ytd-ad-slot-renderer', 'ytd-video-masthead-ad-v3-renderer',
+      'ytd-in-feed-ad-layout-renderer', '[data-tizentube-sponsored="true"]'];
+    for (const selector of known) {
+      data.counts[selector] = document.querySelectorAll(selector).length;
+    }
+    const badgePattern = /^(patrocinad[oa]s?|promocionad[oa]s?|sponsored|promoted|advertisement|publicidad|anuncio|paid promotion|ad)$/i;
+    const candidates = document.querySelectorAll(
+      'span, yt-formatted-string, yt-attributed-string, yt-badge-shape, yt-badge-shape-element'
+    );
+    for (const element of candidates) {
+      if (data.badgeAncestors.length >= 12) break;
+      if (element.children?.length) continue;
+      const label = String(element.textContent || '')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      if (!badgePattern.test(label)) continue;
+      const ancestry = [];
+      let node = element;
+      for (let depth = 0; depth < 9 && node; depth++, node = node.parentElement) {
+        ancestry.push({ tag: String(node.tagName || '').toLowerCase().slice(0, 70),
+          id: String(node.id || '').slice(0, 70) });
+      }
+      data.badgeAncestors.push({ badge: label.toLowerCase(), ancestry });
+    }
+    return data;
+  }
+
+  installDiagnosticShortcut() {
+    if (typeof window === 'undefined' || this._diagnosticKeyHandler) return;
+    this._diagnosticKeyHandler = e => {
+      if (!e.ctrlKey || !e.shiftKey || e.code !== 'F10' || e.repeat) return;
+      e.preventDefault?.();
+      const payload = this.collectSponsoredDiagnostics();
+      try {
+        window.chrome?.webview?.postMessage({ channel: 'adblock:diagnostic', payload });
+      } catch (_) { /* Keep playback working when host IPC is unavailable. */ }
+      console.info('[TizenTube] Local structural ad diagnostic requested');
+    };
+    window.addEventListener?.('keydown', this._diagnosticKeyHandler, true);
+  }
+
+  /**
    * Removes injected cosmetic CSS.
    */
   removeCosmeticStyles() {
@@ -1987,6 +2081,10 @@ class AdBlockBase {
    * Disposes adblock resources and restores global hooks.
    */
   dispose() {
+    if (this._diagnosticKeyHandler && typeof window !== 'undefined') {
+      window.removeEventListener?.('keydown', this._diagnosticKeyHandler, true);
+      this._diagnosticKeyHandler = null;
+    }
     this.stopAutoSkipObserver();
     this.stopSponsoredCardObserver();
     if (this._domReadyListener && typeof document !== 'undefined') {
@@ -1997,6 +2095,10 @@ class AdBlockBase {
     if (this._origJsonParse && typeof JSON !== 'undefined') {
       JSON.parse = this._origJsonParse;
       this._origJsonParse = null;
+    }
+    if (this._origJsonStringify && typeof JSON !== 'undefined') {
+      JSON.stringify = this._origJsonStringify;
+      this._origJsonStringify = null;
     }
     if (this._origResponseJson && typeof Response !== 'undefined') {
       Response.prototype.json = this._origResponseJson;
