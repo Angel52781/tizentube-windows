@@ -118,6 +118,12 @@ namespace TizenTubeWindows
                 return 0;
             }
 
+#if NET8_0_OR_GREATER
+            // WebView2 needs DPI awareness for sharp text on 125/150/200%
+            // displays and when moving across monitors with different scales.
+            // Configure before any HWND is created to prevent bitmap scaling.
+            Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+#endif
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
@@ -162,6 +168,7 @@ namespace TizenTubeWindows
         {
             this.options = options ?? new HostOptions();
 
+            this.AutoScaleMode = AutoScaleMode.Dpi;
             this.Text = "TizenTube";
             this.Size = new Size(1280, 720);
             this.MinimumSize = new Size(800, 500);

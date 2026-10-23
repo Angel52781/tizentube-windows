@@ -1795,6 +1795,10 @@ class AdBlockBase {
       ytd-rich-section-renderer:has(ytd-ad-slot-renderer),
       ytd-rich-section-renderer:has(ytd-video-masthead-ad-v3-renderer),
       ytd-rich-section-renderer:has(yt-promoted-card),
+      ytd-rich-item-renderer:has(a[href*="/pagead/aclk"]),
+      ytd-rich-item-renderer:has(a[href*="googleadservices.com"]),
+      ytd-rich-section-renderer:has(a[href*="/pagead/aclk"]),
+      ytd-rich-section-renderer:has(a[href*="googleadservices.com"]),
       [data-tizentube-sponsored="true"] {
         display: none !important;
         visibility: hidden !important;
@@ -1820,11 +1824,37 @@ class AdBlockBase {
     if (typeof document.querySelectorAll !== 'function') return;
     for (const marker of document.querySelectorAll(markers.join(','))) {
       const card = marker.closest?.('ytd-rich-item-renderer, ytd-rich-section-renderer, ytd-item-section-renderer');
-      if (card && card.getAttribute('data-tizentube-sponsored') !== 'true') {
-        card.setAttribute('data-tizentube-sponsored', 'true');
-        this.blockedCount++;
-      }
+      this.markSponsoredCard(card);
     }
+
+    // A logged-in YouTube feed can render a sponsored video inside a normal
+    // rich-item/section container without an ad-slot-renderer. Recognize only
+    // an explicit ad badge or a known ad-click URL inside that *feed card*;
+    // never search comments, titles or the entire document for ad keywords.
+    for (const card of document.querySelectorAll(
+      'ytd-rich-item-renderer, ytd-rich-section-renderer, ytd-item-section-renderer, ytd-video-renderer'
+    )) {
+      if (card.getAttribute?.('data-tizentube-sponsored') === 'true') continue;
+      const adLink = card.querySelector?.(
+        'a[href*="/pagead/aclk"], a[href*="googleadservices.com"], a[href*="doubleclick.net"]'
+      );
+      const badges = card.querySelectorAll?.(
+        '#ad-badge, #ad-badge-container, yt-badge-shape, .badge-shape, ytd-badge-supported-renderer'
+      ) || [];
+      const adBadge = Array.from(badges).some(badge => {
+        const label = String(badge.getAttribute?.('aria-label') || badge.textContent || '')
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+        return /^(patrocinad[oa]s?|promocionad[oa]s?|sponsored|promoted|advertisement|publicidad|anuncio|paid promotion|ad)$/.test(label);
+      });
+      if (adLink || adBadge) this.markSponsoredCard(card);
+    }
+  }
+
+  markSponsoredCard(card) {
+    if (!card || typeof card.setAttribute !== 'function') return;
+    if (card.getAttribute?.('data-tizentube-sponsored') === 'true') return;
+    card.setAttribute('data-tizentube-sponsored', 'true');
+    this.blockedCount++;
   }
 
   startSponsoredCardObserver() {

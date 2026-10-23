@@ -23,6 +23,7 @@ const events = new Map();
 const observers = [];
 let css = null;
 let markers = [];
+let feedCards = [];
 const card = {
   attributes: {},
   getAttribute(name) { return this.attributes[name] ?? null; },
@@ -37,7 +38,9 @@ const document = {
   createElement(tag) { return { tag, id: '', textContent: '', parentNode: null }; },
   addEventListener(name, fn) { events.set(name, fn); },
   removeEventListener(name) { events.delete(name); },
-  querySelectorAll() { return markers; }
+  querySelectorAll(selector) {
+    return selector.startsWith('ytd-rich-item-renderer, ytd-rich-section-renderer') ? feedCards : markers;
+  }
 };
 globalThis.document = document;
 globalThis.MutationObserver = class {
@@ -71,6 +74,34 @@ try {
   check(block.blockedCount, 1, 'Ad card suppression is counted once');
   observers[0].callback([{ addedNodes: [marker] }]);
   check(block.blockedCount, 1, 'Repeated SPA observer events do not double count');
+
+  // Some logged-in YouTube home feeds render ads in the same rich-item
+  // wrapper as ordinary videos. Ad badges (e.g. "Patrocinado") and click
+  // redirects must be recognized, but not merely videos mentioning ads.
+  const fakeCard = ({ badge = null, adLink = false } = {}) => ({
+    attributes: {},
+    getAttribute(key) { return this.attributes[key] ?? null; },
+    setAttribute(key, val) { this.attributes[key] = val; },
+    querySelector() { return adLink ? { href: 'https://www.googleadservices.com/pagead/aclk' } : null; },
+    querySelectorAll() { return badge === null ? [] : [{ textContent: badge, getAttribute() { return null; } }]; }
+  });
+  const labeledAd = fakeCard({ badge: 'Patrocinado' });
+  const englishAd = fakeCard({ badge: 'Sponsored' });
+  const redirectAd = fakeCard({ adLink: true });
+  const ordinaryVideo = fakeCard({ badge: 'Nuevo' });
+  const titleMentioningAds = fakeCard();
+  titleMentioningAds.textContent = 'Cómo funcionan los anuncios patrocinados';
+  feedCards = [labeledAd, englishAd, redirectAd, ordinaryVideo, titleMentioningAds];
+  markers = [];
+  block.scanSponsoredCards();
+  check(labeledAd.getAttribute('data-tizentube-sponsored'), 'true', 'Sponsored Spanish badge hides a normal-looking feed card');
+  check(englishAd.getAttribute('data-tizentube-sponsored'), 'true', 'Sponsored English badge hides a feed card');
+  check(redirectAd.getAttribute('data-tizentube-sponsored'), 'true', 'Ad-click redirect hides promoted video');
+  check(ordinaryVideo.getAttribute('data-tizentube-sponsored'), null, 'Ordinary badge does not hide recommended video');
+  check(titleMentioningAds.getAttribute('data-tizentube-sponsored'), null, 'Video title mentioning ads is not blocked');
+  const afterFirstScan = block.blockedCount;
+  block.scanSponsoredCards();
+  check(block.blockedCount, afterFirstScan, 'Repeated feed scans do not recount marked cards');
 
   const feed = {
     contents: { twoColumnBrowseResultsRenderer: { tabs: [{ tabRenderer: {

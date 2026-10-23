@@ -1,12 +1,14 @@
 # TizenTube Windows
 
-[![Descargar TizenTube Windows — ZIP portable](https://img.shields.io/badge/%E2%AC%87%20DESCARGAR-Windows%2010%2F11%20x64-087fca?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.3/TizenTube-Windows-x64-v0.1.0-preview.3.zip)
+[![Descargar TizenTube Windows — ZIP portable](https://img.shields.io/badge/%E2%AC%87%20DESCARGAR-Windows%2010%2F11%20x64-087fca?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.4/TizenTube-Windows-x64-v0.1.0-preview.4.zip)
 
-**[Descarga directa para Windows (versión de prueba)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.3/TizenTube-Windows-x64-v0.1.0-preview.3.zip)** · [Instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md) · [Todas las versiones](https://github.com/Angel52781/tizentube-windows/releases)
+**[Descarga directa para Windows (versión de prueba)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.4/TizenTube-Windows-x64-v0.1.0-preview.4.zip)** · [Instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md) · [Todas las versiones](https://github.com/Angel52781/tizentube-windows/releases)
 
 > **¿Windows muestra «Windows protegió su PC»?** Esta versión de prueba todavía no tiene firma digital de un editor reconocido. Consulta [por qué sucede y las opciones de firma](docs/SMARTSCREEN_AND_SIGNING.md). No implica por sí mismo que el archivo sea malicioso; verifica siempre el origen y el SHA-256.
 
-**Descarga para probar en Windows 10/11 x64:** [Releases / v0.1.0-preview.3](https://github.com/Angel52781/tizentube-windows/releases/tag/v0.1.0-preview.3). Descargar el ZIP de **Assets**, extraer toda la carpeta y ejecutar `TizenTubeHost.exe`. Ver [instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md).
+**Descarga para probar en Windows 10/11 x64:** [Releases / v0.1.0-preview.4](https://github.com/Angel52781/tizentube-windows/releases/tag/v0.1.0-preview.4). Descargar el ZIP de **Assets**, extraer toda la carpeta y ejecutar `TizenTubeHost.exe`. Ver [instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md).
+
+**Preview.4:** reconocimiento conservador de anuncios patrocinados con etiqueta visible (`Patrocinado`, `Sponsored`, etc.) o URL de clic publicitario en tarjetas de inicio; compatibilidad DPI **Per-Monitor V2** para intentar evitar texto borroso en pantallas escaladas y varios monitores. Se conserva la interfaz de comentarios de YouTube y el inicio de sesión Google. Las pruebas automatizadas no sustituyen la revisión visual de la cuenta del usuario.
 
 **Preview.3 — corrección de publicidad en inicio:** corrige la inyección cosmética al crear el DOM, cubre tarjetas patrocinadas de portada y feeds dinámicos y filtra anuncios en respuestas `/youtubei/v1/browse`, `/search` y `/next`. Conserva el contenido orgánico y las respuestas de Google Accounts. La prueba CI ahora verifica que AdBlock y su hoja de estilos estén realmente activos en WebView2. Sigue pendiente corroborar en tu sesión de YouTube la desaparición de todos los formatos publicitarios.
 
