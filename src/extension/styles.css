@@ -1,0 +1,818 @@
+/**
+ * TizenTube Windows - Cohesive Design System & UI Styles
+ * Copyright (C) 2026 TizenTube Windows Contributors
+ * Licensed under the GNU General Public License v3.0 (GPL-3.0-only).
+ *
+ * Optimized for desktop WebView2 & high-resolution displays.
+ * Implements accessible dark theme, high-contrast semantics, and anti-slop guidelines.
+ */
+
+:root {
+  --tt-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --tt-bg-base: #0f0f0f;
+  --tt-bg-elevated: #181818;
+  --tt-bg-surface: #222222;
+  --tt-bg-hover: #2f2f2f;
+  --tt-border: #383838;
+  --tt-text-primary: #f1f1f1;
+  --tt-text-secondary: #aaaaaa;
+  --tt-text-muted: #717171;
+  --tt-accent: #3ea6ff;
+  --tt-accent-hover: #65b8ff;
+  --tt-danger: #ff4e4e;
+  
+  /* SponsorBlock Category Colors */
+  --tt-sb-sponsor: #00d400;
+  --tt-sb-intro: #00ffff;
+  --tt-sb-outro: #0202ed;
+  --tt-sb-interaction: #cc00ff;
+  --tt-sb-selfpromo: #ffff00;
+  --tt-sb-preview: #008fd6;
+  --tt-sb-filler: #7300ff;
+  --tt-sb-music: #ff9900;
+  
+  --tt-radius-sm: 4px;
+  --tt-radius-md: 8px;
+  --tt-radius-lg: 12px;
+  --tt-shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --tt-z-nav: 9000;
+  --tt-z-hud: 9500;
+  --tt-z-toast: 9800;
+  --tt-z-modal: 9999;
+}
+
+/* ============================================================================
+   Common Button & Form Styles
+   ============================================================================ */
+.tt-btn {
+  background: transparent;
+  color: var(--tt-text-primary);
+  border: none;
+  border-radius: var(--tt-radius-sm);
+  padding: 6px 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease, transform 0.1s ease;
+  user-select: none;
+}
+
+.tt-btn:hover {
+  background-color: var(--tt-bg-hover);
+}
+
+.tt-btn:active {
+  transform: scale(0.96);
+}
+
+.tt-btn:focus-visible {
+  outline: 2px solid var(--tt-accent);
+  outline-offset: 2px;
+}
+
+.tt-btn-primary {
+  background-color: var(--tt-accent);
+  color: #000000;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: var(--tt-radius-md);
+}
+
+.tt-btn-primary:hover {
+  background-color: var(--tt-accent-hover);
+}
+
+.tt-btn-secondary {
+  background-color: var(--tt-bg-surface);
+  color: var(--tt-text-primary);
+  border: 1px solid var(--tt-border);
+  padding: 8px 16px;
+  border-radius: var(--tt-radius-md);
+}
+
+.tt-btn-secondary:hover {
+  background-color: var(--tt-bg-hover);
+}
+
+/* ============================================================================
+   Top Navigation Bar
+   ============================================================================ */
+.tt-nav-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  background-color: rgba(15, 15, 15, 0.95);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--tt-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  z-index: var(--tt-z-nav);
+  font-family: var(--tt-font);
+  transition: transform 0.25s ease, opacity 0.25s ease;
+  contain: layout style;
+}
+
+.tt-nav-autohide:not(:hover):not(:focus-within) {
+  transform: translateY(-44px);
+}
+
+.tt-nav-fullscreen-hidden {
+  transform: translateY(-100%) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.tt-nav-left, .tt-nav-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tt-nav-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.tt-nav-center {
+  flex: 1;
+  max-width: 600px;
+  margin: 0 16px;
+}
+
+.tt-search-form {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 6px;
+}
+
+.tt-search-wrapper {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  background-color: var(--tt-bg-elevated);
+  border: 1px solid var(--tt-border);
+  border-radius: 20px;
+  padding: 0 12px;
+}
+
+.tt-search-wrapper:focus-within {
+  border-color: var(--tt-accent);
+}
+
+.tt-search-icon {
+  color: var(--tt-text-muted);
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.tt-search-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--tt-text-primary);
+  font-family: var(--tt-font);
+  font-size: 13px;
+  height: 32px;
+}
+
+.tt-search-clear {
+  background: none;
+  border: none;
+  color: var(--tt-text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  display: none;
+  padding: 0 4px;
+}
+
+.tt-search-clear:hover {
+  color: var(--tt-text-primary);
+}
+
+.tt-search-submit {
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 16px;
+  background-color: var(--tt-bg-surface);
+  border: 1px solid var(--tt-border);
+}
+
+.tt-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  background-color: var(--tt-bg-elevated);
+  border: 1px solid var(--tt-border);
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tt-text-secondary);
+  cursor: default;
+}
+
+/* ============================================================================
+   Player Controls HUD (Floating Media Bar)
+   ============================================================================ */
+.tt-player-hud {
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%) translateY(0);
+  width: calc(100% - 32px);
+  max-width: 960px;
+  background-color: rgba(24, 24, 24, 0.94);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-lg);
+  box-shadow: var(--tt-shadow-overlay);
+  padding: 10px 16px;
+  z-index: var(--tt-z-hud);
+  font-family: var(--tt-font);
+  opacity: 1;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  pointer-events: auto;
+  contain: layout style;
+  will-change: opacity, transform;
+}
+
+.tt-player-hud:not(.tt-hud-visible) {
+  opacity: 0;
+  transform: translateX(-50%) translateY(20px);
+  pointer-events: none;
+}
+
+/* Timeline Track */
+.tt-timeline-container {
+  position: relative;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  margin-bottom: 8px;
+}
+
+.tt-timeline-track {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+  transition: height 0.15s ease;
+}
+
+.tt-timeline-container:hover .tt-timeline-track {
+  height: 8px;
+}
+
+.tt-timeline-buffer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.35);
+  border-radius: 2px;
+  width: 0%;
+}
+
+.tt-timeline-markers {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.tt-segment-marker {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 1px;
+  opacity: 0.85;
+}
+
+.tt-timeline-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background-color: var(--tt-accent);
+  border-radius: 2px;
+  width: 0%;
+}
+
+.tt-timeline-handle {
+  position: absolute;
+  top: 50%;
+  left: 0%;
+  width: 12px;
+  height: 12px;
+  background-color: var(--tt-accent);
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  transition: transform 0.15s ease;
+}
+
+.tt-timeline-container:hover .tt-timeline-handle {
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.tt-timeline-tooltip {
+  position: absolute;
+  bottom: 24px;
+  transform: translateX(-50%);
+  background-color: #000000;
+  color: #ffffff;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: var(--tt-radius-sm);
+  display: none;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* Controls Row */
+.tt-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tt-controls-left, .tt-controls-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tt-play-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background-color: var(--tt-bg-surface);
+}
+
+.tt-play-btn:hover {
+  background-color: var(--tt-bg-hover);
+}
+
+.tt-time-display {
+  font-size: 12px;
+  color: var(--tt-text-secondary);
+  font-variant-numeric: tabular-nums;
+  margin-left: 6px;
+}
+
+.tt-volume-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tt-volume-slider {
+  width: 70px;
+  height: 4px;
+  accent-color: var(--tt-accent);
+  cursor: pointer;
+}
+
+.tt-speed-dropdown {
+  position: relative;
+}
+
+.tt-speed-btn {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 8px;
+  background-color: var(--tt-bg-surface);
+  border-radius: var(--tt-radius-sm);
+}
+
+.tt-speed-menu {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  margin-bottom: 8px;
+  background-color: var(--tt-bg-elevated);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-md);
+  box-shadow: var(--tt-shadow-overlay);
+  display: none;
+  flex-direction: column;
+  padding: 4px;
+  min-width: 90px;
+}
+
+.tt-speed-menu.tt-menu-open {
+  display: flex;
+}
+
+.tt-speed-item {
+  background: none;
+  border: none;
+  color: var(--tt-text-primary);
+  font-size: 12px;
+  padding: 6px 12px;
+  text-align: left;
+  border-radius: var(--tt-radius-sm);
+  cursor: pointer;
+}
+
+.tt-speed-item:hover {
+  background-color: var(--tt-bg-hover);
+}
+
+.tt-speed-item.tt-speed-active {
+  color: var(--tt-accent);
+  font-weight: 600;
+}
+
+/* ============================================================================
+   Toast Notification System
+   ============================================================================ */
+.tt-toast-container {
+  position: fixed;
+  bottom: 80px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: var(--tt-z-toast);
+  font-family: var(--tt-font);
+  pointer-events: none;
+}
+
+.tt-toast {
+  position: relative;
+  background-color: var(--tt-bg-elevated);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-md);
+  box-shadow: var(--tt-shadow-overlay);
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  gap: 12px;
+  min-width: 260px;
+  max-width: 400px;
+  opacity: 0;
+  transform: translateY(12px) scale(0.96);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: auto;
+}
+
+.tt-toast-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.tt-toast-hiding {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.95);
+}
+
+.tt-toast-accent {
+  width: 4px;
+  height: 28px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.tt-toast-body {
+  flex: 1;
+}
+
+.tt-toast-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--tt-text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.tt-toast-message {
+  font-size: 13px;
+  color: var(--tt-text-primary);
+  margin-top: 2px;
+}
+
+.tt-toast-action {
+  background: var(--tt-bg-surface);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-sm);
+  color: var(--tt-accent);
+  font-weight: 600;
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.tt-toast-action:hover {
+  background-color: var(--tt-bg-hover);
+}
+
+.tt-toast-close {
+  background: none;
+  border: none;
+  color: var(--tt-text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.tt-toast-close:hover {
+  color: var(--tt-text-primary);
+}
+
+/* ============================================================================
+   Settings Modal Dialog
+   ============================================================================ */
+.tt-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--tt-z-modal);
+  font-family: var(--tt-font);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.tt-modal-backdrop.tt-modal-open {
+  opacity: 1;
+}
+
+.tt-modal-dialog {
+  background-color: var(--tt-bg-elevated);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-lg);
+  box-shadow: var(--tt-shadow-overlay);
+  width: 90%;
+  max-width: 580px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: scale(0.96);
+  transition: transform 0.2s ease;
+}
+
+.tt-modal-open .tt-modal-dialog {
+  transform: scale(1);
+}
+
+.tt-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--tt-border);
+}
+
+.tt-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tt-modal-title h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--tt-text-primary);
+  margin: 0;
+}
+
+.tt-modal-close {
+  background: none;
+  border: none;
+  color: var(--tt-text-muted);
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.tt-modal-close:hover {
+  color: var(--tt-text-primary);
+}
+
+.tt-modal-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tt-settings-section {
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-md);
+  padding: 12px 16px;
+  margin: 0;
+}
+
+.tt-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tt-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+}
+
+.tt-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tt-toggle-row + .tt-toggle-row {
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.tt-label-text {
+  font-size: 13px;
+  color: var(--tt-text-secondary);
+}
+
+/* Custom CSS Toggle Switch */
+.tt-toggle-checkbox {
+  display: none;
+}
+
+.tt-toggle-switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background-color: var(--tt-bg-surface);
+  border: 1px solid var(--tt-border);
+  border-radius: 10px;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+  flex-shrink: 0;
+}
+
+.tt-toggle-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background-color: var(--tt-text-muted);
+  border-radius: 50%;
+  transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+.tt-toggle-checkbox:checked + .tt-toggle-switch {
+  background-color: var(--tt-accent);
+  border-color: var(--tt-accent);
+}
+
+.tt-toggle-checkbox:checked + .tt-toggle-switch::after {
+  transform: translateX(16px);
+  background-color: #000000;
+}
+
+.tt-categories-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tt-text-secondary);
+  margin-top: 10px;
+  margin-bottom: 6px;
+}
+
+.tt-categories-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.tt-category-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: var(--tt-bg-surface);
+  padding: 6px 10px;
+  border-radius: var(--tt-radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--tt-text-primary);
+}
+
+.tt-cat-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tt-select-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+}
+
+.tt-select {
+  background-color: var(--tt-bg-surface);
+  color: var(--tt-text-primary);
+  border: 1px solid var(--tt-border);
+  border-radius: var(--tt-radius-sm);
+  padding: 4px 8px;
+  font-size: 12px;
+  outline: none;
+}
+
+.tt-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-top: 1px solid var(--tt-border);
+  background-color: var(--tt-bg-base);
+}
+
+/* ============================================================================
+   Rendering Optimizations & Visual Footprint Reductions
+   ============================================================================ */
+
+/* CSS Containment to isolate DOM recalculations and prevent full-page layout thrashing */
+.tt-toast-container {
+  contain: layout style;
+}
+
+.tt-modal-backdrop {
+  contain: strict;
+}
+
+/* Cursor Auto-Hiding during Active Video Playback */
+.tt-cursor-hidden,
+.tt-cursor-hidden * {
+  cursor: none !important;
+}
+
+/* Compact Player HUD Mode */
+.tt-hud-compact {
+  padding: 6px 12px;
+  max-width: 720px;
+}
+
+.tt-hud-compact .tt-timeline-container {
+  height: 14px;
+  margin-bottom: 4px;
+}
+
+.tt-hud-compact .tt-btn {
+  padding: 4px 6px;
+}
+
+.tt-hud-compact .tt-time-display {
+  font-size: 11px;
+}
+
+/* High Contrast UI Theme */
+.tt-high-contrast {
+  --tt-border: #666666;
+  --tt-bg-base: #000000;
+  --tt-bg-elevated: #111111;
+  --tt-bg-surface: #1a1a1a;
+  --tt-text-primary: #ffffff;
+  --tt-text-secondary: #cccccc;
+  --tt-accent: #00e5ff;
+}
+
+.tt-high-contrast .tt-btn:focus-visible {
+  outline: 3px solid #ffff00;
+  outline-offset: 2px;
+}
+
+/* Accessibility: Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  .tt-btn,
+  .tt-nav-bar,
+  .tt-player-hud,
+  .tt-modal-backdrop,
+  .tt-toast {
+    transition: none !important;
+    animation: none !important;
+  }
+}

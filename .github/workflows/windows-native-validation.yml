@@ -1,0 +1,165 @@
+name: Windows Native Host & CI Validation
+
+on:
+  push:
+    branches:
+      - main
+      - 'ci/**'
+      - ci/windows-native-validation
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-host:
+    name: Windows x64 Native Host & Telemetry Validation
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK 8.0
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify JavaScript modules, runtime, and unit tests
+        shell: pwsh
+        run: |
+          npm test
+
+      - name: Verify PE32+ reproducible builder and bit-exact determinism
+        shell: pwsh
+        run: |
+          python scripts/build_x64.py
+          python scripts/verify_pe.py dist/TizenTube-win-x64/TizenTube.exe
+          $hash1 = (Get-FileHash dist/TizenTube-win-x64/TizenTube.exe -Algorithm SHA256).Hash
+          python scripts/build_x64.py
+          $hash2 = (Get-FileHash dist/TizenTube-win-x64/TizenTube.exe -Algorithm SHA256).Hash
+          if ($hash1 -ne $hash2) { throw "PE_BUILD_NOT_DETERMINISTIC: $hash1 != $hash2" }
+          Write-Host "[OK] Bit-exact deterministic PE build verified ($hash1)" -ForegroundColor Green
+          node scripts/test_host_integrity.js
+
+      - name: Compile actual C# Windows host (x64 Release)
+        shell: pwsh
+        run: |
+          dotnet publish src/native/TizenTubeWindows.csproj -c Release -f net8.0-windows -r win-x64 --self-contained false -o windows-out
+          if ($LASTEXITCODE -ne 0) { throw 'DOTNET_HOST_BUILD_FAILED' }
+          if (!(Test-Path windows-out/TizenTubeHost.exe)) { throw 'NATIVE_HOST_EXE_MISSING' }
+
+          Copy-Item -Path src -Destination windows-out/app -Recurse -Force
+          $exe = Get-Item windows-out/TizenTubeHost.exe
+          if ($exe.Length -lt 10000) { throw 'NATIVE_HOST_EXE_UNEXPECTEDLY_SMALL' }
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
+
+          New-Item -ItemType Directory -Path windows-out/telemetry -Force | Out-Null
+          "HOST_EXE=$($exe.FullName)" | Out-File -FilePath windows-out/build-evidence.txt
+          "SIZE=$($exe.Length)" | Out-File -FilePath windows-out/build-evidence.txt -Append
+          "SHA256=$hash" | Out-File -FilePath windows-out/build-evidence.txt -Append
+          "DOTNET_VERSION=8.0" | Out-File -FilePath windows-out/build-evidence.txt -Append
+          "TIMESTAMP=$([DateTime]::UtcNow.ToString('o'))" | Out-File -FilePath windows-out/build-evidence.txt -Append
+          Write-Host "[OK] Compiled native host: $hash ($($exe.Length) bytes)" -ForegroundColor Green
+
+      - name: Execute Windows native host with process tree telemetry (multi-scenario)
+        shell: pwsh
+        run: |
+          $hostExe = (Resolve-Path windows-out/TizenTubeHost.exe).Path
+
+          Write-Host "`n>>> [SCENARIO 1] Executing Standard Native Host Startup Telemetry (20s)..." -ForegroundColor Cyan
+          pwsh scripts/measure_memory.ps1 -ExePath $hostExe -DurationSeconds 20 -SamplingIntervalMs 1000 -OutputDir windows-out/telemetry/standard -Scenario "ci-standard-startup"
+          if ($LASTEXITCODE -ne 0) { throw "PROCESS_TELEMETRY_STANDARD_FAILED" }
+          if (!(Test-Path windows-out/telemetry/standard/memory-telemetry.json)) { throw "TELEMETRY_JSON_MISSING_STANDARD" }
+          if (!(Test-Path windows-out/telemetry/standard/memory-summary.txt)) { throw "TELEMETRY_SUMMARY_MISSING_STANDARD" }
+
+          # Copy primary telemetry to root telemetry directory for canonical referencing
+          Copy-Item windows-out/telemetry/standard/* windows-out/telemetry/ -Force
+
+          Write-Host "`n>>> [SCENARIO 2] Executing Headless Mode with Working Set Trimming Telemetry (20s)..." -ForegroundColor Cyan
+          pwsh scripts/measure_memory.ps1 -ExePath $hostExe -DurationSeconds 20 -SamplingIntervalMs 1000 -OutputDir windows-out/telemetry/headless -Scenario "ci-headless-trim" -Headless
+          if ($LASTEXITCODE -ne 0) { throw "PROCESS_TELEMETRY_HEADLESS_FAILED" }
+          if (!(Test-Path windows-out/telemetry/headless/memory-telemetry.json)) { throw "TELEMETRY_JSON_MISSING_HEADLESS" }
+          if (!(Test-Path windows-out/telemetry/headless/memory-summary.txt)) { throw "TELEMETRY_SUMMARY_MISSING_HEADLESS" }
+
+      - name: Validate process tree telemetry and verify quality gates
+        shell: pwsh
+        run: |
+          Write-Host ">>> Validating Scenario 1 (Standard) Telemetry Artifacts..." -ForegroundColor Cyan
+          node scripts/measure_process_telemetry.js --validate windows-out/telemetry/standard/memory-telemetry.json
+          if (Test-Path windows-out/telemetry/standard/host-internal-telemetry.json) {
+            node scripts/measure_process_telemetry.js --validate windows-out/telemetry/standard/host-internal-telemetry.json
+          }
+          Get-Content windows-out/telemetry/standard/memory-summary.txt
+
+          Write-Host "`n>>> Validating Scenario 2 (Headless & Trim) Telemetry Artifacts..." -ForegroundColor Cyan
+          node scripts/measure_process_telemetry.js --validate windows-out/telemetry/headless/memory-telemetry.json
+          if (Test-Path windows-out/telemetry/headless/host-internal-telemetry.json) {
+            node scripts/measure_process_telemetry.js --validate windows-out/telemetry/headless/host-internal-telemetry.json
+          }
+          Get-Content windows-out/telemetry/headless/memory-summary.txt
+
+      - name: Upload validation evidence and telemetry artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-host-validation
+          path: |
+            windows-out/build-evidence.txt
+            windows-out/telemetry/**
+            dist/TizenTube-win-x64/SHA256SUMS.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Build portable Windows x64 tester package (self-contained .NET)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pkg = 'release-out/TizenTube-Windows-x64'
+          New-Item -ItemType Directory -Path $pkg -Force | Out-Null
+          dotnet publish src/native/TizenTubeWindows.csproj -c Release -f net8.0-windows -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o $pkg
+          if ($LASTEXITCODE -ne 0) { throw 'PORTABLE_NATIVE_HOST_BUILD_FAILED' }
+          $exe = Join-Path $pkg 'TizenTubeHost.exe'
+          if (!(Test-Path $exe)) { throw 'PORTABLE_HOST_EXE_MISSING' }
+          if ((Get-Item $exe).Length -lt 10000000) { throw 'PORTABLE_HOST_NOT_SELF_CONTAINED' }
+          if (Test-Path (Join-Path $pkg 'app')) { throw 'PACKAGE_APP_DIR_ALREADY_PRESENT' }
+          Copy-Item -Path src -Destination (Join-Path $pkg 'app') -Recurse -Force
+          Copy-Item LICENSE (Join-Path $pkg 'LICENSE')
+          Copy-Item docs/GETTING_STARTED_WINDOWS.md (Join-Path $pkg 'LEEME_INSTALACION.md')
+          foreach ($required in @('app/mods/tizentube.bundle.js','app/ui/styles.css','app/extension/manifest.json','TizenTubeHost.exe','LICENSE','LEEME_INSTALACION.md')) {
+            if (!(Test-Path (Join-Path $pkg $required))) { throw "PACKAGE_MISSING_REQUIRED_FILE_$required" }
+          }
+          $exeSha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "TizenTubeHost.exe SHA256=$exeSha" | Set-Content (Join-Path $pkg 'CHECKSUMS.txt')
+          "Commit=$env:GITHUB_SHA" | Add-Content (Join-Path $pkg 'CHECKSUMS.txt')
+          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.1.zip'
+          Compress-Archive -Path $pkg -DestinationPath $zip -CompressionLevel Optimal -Force
+          if (!(Test-Path $zip)) { throw 'PORTABLE_ZIP_MISSING' }
+          $zipSha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$zipSha  $(Split-Path $zip -Leaf)" | Set-Content 'release-out/SHA256SUMS.txt'
+          Write-Host "PREVIEW_PACKAGE=$(Split-Path $zip -Leaf)"
+          Write-Host "PREVIEW_ZIP_SHA256=$zipSha"
+          Write-Host "PORTABLE_HOST_SHA256=$exeSha"
+
+      - name: Upload portable tester ZIP and SHA-256
+        uses: actions/upload-artifact@v4
+        with:
+          name: tizentube-windows-x64-portable-preview
+          path: |
+            release-out/TizenTube-Windows-x64-v0.1.0-preview.1.zip
+            release-out/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14

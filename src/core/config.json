@@ -1,0 +1,68 @@
+{
+  "appName": "TizenTube Windows",
+  "version": "0.1.0",
+  "targetPlatform": "win32-x64",
+  "startUrl": "https://www.youtube.com",
+  "window": {
+    "title": "TizenTube",
+    "width": 1280,
+    "height": 720,
+    "minWidth": 800,
+    "minHeight": 500,
+    "startMaximized": false,
+    "fullscreen": false,
+    "customTitleBar": true
+  },
+  "runtime": {
+    "engine": "WebView2",
+    "userDataFolder": "%LOCALAPPDATA%\\TizenTube\\UserData",
+    "rendererProcessLimit": 1,
+    "memoryTrimIntervalMs": 30000,
+    "trimOnMinimize": true,
+    "chromiumFlags": [
+      "--renderer-process-limit=1",
+      "--disable-features=Translate,OptimizationHints,MediaRouter,CalculateNativeWinOcclusion,InterestFeedContentSuggestions",
+      "--enable-features=VaapiVideoDecoder,PlatformHEVCDecoderSupport",
+      "--disk-cache-size=104857600",
+      "--media-cache-size=104857600",
+      "--disable-background-timer-throttling",
+      "--disable-renderer-backgrounding",
+      "--enable-gpu-rasterization",
+      "--enable-zero-copy"
+    ]
+  },
+  "features": {
+    "adblock": {
+      "enabled": true,
+      "blockNetworkRequests": true,
+      "filterJsonResponse": true,
+      "cosmeticFilter": true
+    },
+    "sponsorblock": {
+      "enabled": true,
+      "apiUrl": "https://sponsor.ajay.app/api",
+      "autoSkip": true,
+      "categories": [
+        "sponsor",
+        "intro",
+        "outro",
+        "selfpromo",
+        "interaction"
+      ],
+      "showNotice": true
+    },
+    "dearrow": {
+      "enabled": true,
+      "apiUrl": "https://dearrow-thumb.ajay.app/api/v1",
+      "replaceThumbnails": true,
+      "replaceTitles": true
+    },
+    "playback": {
+      "defaultQuality": "auto",
+      "defaultSpeed": 1.0,
+      "volume": 100,
+      "rememberPlaybackPosition": true,
+      "customShortcuts": true
+    }
+  }
+}

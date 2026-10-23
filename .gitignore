@@ -1,0 +1,13 @@
+references/
+evidence/*.json
+evidence/*.txt
+node_modules/
+.ci-staging/
+dist/
+out/
+release/
+build/
+*.log
+.env
+.env.*
+!.env.example

@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "TizenTube Windows Injection Extension",
+  "version": "0.1.0",
+  "description": "Injects TizenTube AdBlock, SponsorBlock, DeArrow and HUD UI into YouTube",
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://youtube.com/*"
+      ],
+      "js": [
+        "tizentube.bundle.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "tizentube_adblock_rules",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
+  "permissions": [
+    "declarativeNetRequest"
+  ],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "*://*.doubleclick.net/*",
+    "*://*.googleads.g.doubleclick.net/*",
+    "*://*.googlevideo.com/*"
+  ]
+}
