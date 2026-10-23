@@ -74,6 +74,10 @@ export function validateTelemetryFile(filePath) {
   } else {
     for (let i = 0; i < data.processes.length; i++) {
       const p = data.processes[i];
+      if (!p || typeof p !== 'object' || Array.isArray(p)) {
+        errors.push(`Process[${i}] is not a process record`);
+        continue;
+      }
       if (!p.pid || typeof p.pid !== 'number') {
         errors.push(`Process[${i}] missing valid numeric PID`);
       }

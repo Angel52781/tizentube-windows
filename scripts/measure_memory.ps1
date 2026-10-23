@@ -291,7 +291,11 @@ foreach ($s in $samples) {
 }
 
 $processSummaries = [System.Collections.Generic.List[PSObject]]::new()
-foreach ($kv in $uniquePids) {
+# PowerShell treats IDictionary as one scalar during foreach rather than
+# enumerating KeyValuePair entries. Without GetEnumerator(), $kv.Value is
+# $null and the JSON `processes` array becomes [null] even when samples
+# contain valid individual PIDs.
+foreach ($kv in $uniquePids.GetEnumerator()) {
     $processSummaries.Add($kv.Value)
 }
 
