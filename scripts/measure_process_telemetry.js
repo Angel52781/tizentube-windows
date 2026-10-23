@@ -26,7 +26,10 @@ export function validateTelemetryFile(filePath) {
   let data;
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
-    data = JSON.parse(raw);
+    // .NET Encoding.UTF8 may emit a BOM at the beginning of the native
+    // host telemetry file. A BOM is valid as a UTF-8 signature, but the
+    // JavaScript JSON parser requires it to be removed before parsing.
+    data = JSON.parse(raw.replace(/^\uFEFF/, ''));
   } catch (err) {
     return { valid: false, errors: [`Failed to parse JSON: ${err.message}`], summary: null };
   }
