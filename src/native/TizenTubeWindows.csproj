@@ -24,6 +24,14 @@
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2210.55" />
   </ItemGroup>
 
+  <!-- Always embed the complete YouTube mods and CSS into the host. A user can
+       move TizenTubeHost.exe onto the Desktop without silently losing AdBlock,
+       SponsorBlock, DeArrow or diagnostics. Build must run bundle_mods first. -->
+  <ItemGroup>
+    <EmbeddedResource Include="../../src/mods/tizentube.bundle.js" LogicalName="TizenTube.InjectedBundle" />
+    <EmbeddedResource Include="../../src/ui/styles.css" LogicalName="TizenTube.InjectedStyles" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Update="app\**\*.*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

@@ -174,6 +174,24 @@ jobs:
           Copy-Item $smokePath 'release-out/portable-smoke-evidence.json' -Force
           Remove-Item $smokePath -Force
           Write-Host '[OK] Self-contained portable host and bundled WebView2Loader verified by execution'
+          # CRITICAL regression: user moved only TizenTubeHost.exe onto the
+          # Desktop. Previous builds silently omitted AdBlock/SponsorBlock.
+          # Prove this very same EXE works with NO app/ sibling folder.
+          $singleDir = Join-Path $env:RUNNER_TEMP 'TizenTube-EXE-Only'
+          New-Item -ItemType Directory -Path $singleDir -Force | Out-Null
+          $singleExe = Join-Path $singleDir 'TizenTubeHost.exe'
+          Copy-Item $exe $singleExe -Force
+          if (Test-Path (Join-Path $singleDir 'app')) { throw 'STANDALONE_TEST_NOT_ISOLATED' }
+          $singleTelemetry = Join-Path $singleDir 'single-exe-smoke.json'
+          $singleHost = Start-Process -FilePath $singleExe -WorkingDirectory $singleDir -ArgumentList @('--smoke-test','22','--telemetry-file',$singleTelemetry) -PassThru -Wait
+          if ($singleHost.ExitCode -ne 0) { throw "STANDALONE_HOST_EXIT_$($singleHost.ExitCode)" }
+          if (!(Test-Path $singleTelemetry)) { throw 'STANDALONE_TELEMETRY_MISSING' }
+          $single = Get-Content $singleTelemetry -Raw -Encoding utf8 | ConvertFrom-Json
+          if ($single.summary.modsInitializedCount -lt 1) { throw 'STANDALONE_MODS_NOT_LOADED' }
+          if ($single.summary.adblockRuntimeObserved -lt 1) { throw 'STANDALONE_ADBLOCK_NOT_LOADED' }
+          if ($single.summary.adblockStyleObserved -lt 1) { throw 'STANDALONE_COSMETIC_NOT_LOADED' }
+          Copy-Item $singleTelemetry 'release-out/standalone-exe-smoke-evidence.json' -Force
+          Write-Host '[OK] A lone TizenTubeHost.exe boots WebView2 with full embedded bundle and styles'
           # Research-only probe. WebView2 != Cobalt; an exit code 0 is not
           # proof that YouTube TV works or ad-free playback is available.
           $tvProbe = Join-Path (Resolve-Path $pkg).Path 'experimental-tv-smoke.json'
@@ -189,7 +207,7 @@ jobs:
           $exeSha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "TizenTubeHost.exe SHA256=$exeSha" | Set-Content (Join-Path $pkg 'CHECKSUMS.txt')
           "Commit=$env:GITHUB_SHA" | Add-Content (Join-Path $pkg 'CHECKSUMS.txt')
-          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.5.zip'
+          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.6.zip'
           Compress-Archive -Path $pkg -DestinationPath $zip -CompressionLevel Optimal -Force
           if (!(Test-Path $zip)) { throw 'PORTABLE_ZIP_MISSING' }
           $zipSha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -203,9 +221,10 @@ jobs:
         with:
           name: tizentube-windows-x64-portable-preview
           path: |
-            release-out/TizenTube-Windows-x64-v0.1.0-preview.5.zip
+            release-out/TizenTube-Windows-x64-v0.1.0-preview.6.zip
             release-out/SHA256SUMS.txt
             release-out/portable-smoke-evidence.json
+            release-out/standalone-exe-smoke-evidence.json
             release-out/experimental-tv-smoke-evidence.json
           if-no-files-found: error
           retention-days: 14

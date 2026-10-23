@@ -17,6 +17,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Globalization;
+using System.Reflection;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -31,6 +32,7 @@ namespace TizenTubeWindows
         public bool StartMinimized { get; set; } = false;
         public bool HeadlessMode { get; set; } = false;
         public bool ShowHelp { get; set; } = false;
+        public bool DiagnoseAdsOnStartup { get; set; } = false;
         public bool TvMode { get; set; } = false;
 
         public static HostOptions Parse(string[] args)
@@ -87,6 +89,11 @@ namespace TizenTubeWindows
                     options.TvMode = true;
                     options.InitialUrl = "https://www.youtube.com/tv";
                 }
+                else if (arg == "--diagnose-ads")
+                {
+                    // Opt-in and metadata-only; never capture auth/cookies.
+                    options.DiagnoseAdsOnStartup = true;
+                }
                 else if (arg == "--help" || arg == "-h")
                 {
                     options.ShowHelp = true;
@@ -109,6 +116,7 @@ namespace TizenTubeWindows
             Console.WriteLine("  --minimized           Launch with window initially minimized");
             Console.WriteLine("  --headless            Launch hidden offscreen for CI/automated testing");
             Console.WriteLine("  --tv                  Experimental YouTube TV UI (Cobalt-like); separate profile");
+            Console.WriteLine("  --diagnose-ads        Save a local, metadata-only ad structure report on first load");
             Console.WriteLine("  --help, -h            Show this help message");
         }
     }
@@ -167,6 +175,7 @@ namespace TizenTubeWindows
         // reaches a loaded WebView2 DOM (not merely bundled at compile time).
         private long adblockStyleObserved = 0;
         private long adblockRuntimeObserved = 0;
+        private bool initialAdDiagnosticQueued = false;
         private DateTime startTimeUtc = DateTime.UtcNow;
 
         public int ExitCode { get; private set; } = 0;
@@ -252,6 +261,7 @@ namespace TizenTubeWindows
                 SetupNetworkAdBlocker();
                 SetupFullscreenHandling();
                 SetupIpcBridge();
+                SetupAdblockDiagnosticMenu();
                 await InjectModsAsync();
 
                 string navUrl = !string.IsNullOrEmpty(options.InitialUrl) ? options.InitialUrl : "https://www.youtube.com";
@@ -325,6 +335,11 @@ namespace TizenTubeWindows
                 {
                     Console.WriteLine($"[Host Navigation] Navigation completed successfully. HTTP: {args.HttpStatusCode}");
                     Debug.WriteLine($"[Host Navigation] Completed successfully. HTTP: {args.HttpStatusCode}");
+                    if (options.DiagnoseAdsOnStartup && !initialAdDiagnosticQueued)
+                    {
+                        initialAdDiagnosticQueued = true;
+                        _ = CaptureInitialAdDiagnosticAsync();
+                    }
                     if (options.SmokeTest)
                     {
                         try
@@ -348,6 +363,44 @@ namespace TizenTubeWindows
                     Console.Error.WriteLine($"[Host Navigation Error] WebErrorStatus: {args.WebErrorStatus}, HTTP: {args.HttpStatusCode}");
                     Debug.WriteLine($"[Host Navigation Error] WebErrorStatus: {args.WebErrorStatus}, HTTP: {args.HttpStatusCode}");
                 }
+            };
+        }
+
+        private async Task CaptureInitialAdDiagnosticAsync()
+        {
+            // Wait for YouTube's asynchronous home feed to appear; this is
+            // only enabled with --diagnose-ads and sends metadata to the
+            // existing local-only handler (no external network requests).
+            await Task.Delay(4500);
+            await RequestAdDiagnosticAsync();
+        }
+
+        private async Task RequestAdDiagnosticAsync()
+        {
+            if (webView?.CoreWebView2 == null) return;
+            try
+            {
+                await webView.CoreWebView2.ExecuteScriptAsync(
+                    "(() => { const ad = window.__TIZENTUBE_LOADER__?.adblock; " +
+                    "if (ad && ad.collectSponsoredDiagnostics) " +
+                    "window.chrome.webview.postMessage({ channel: 'adblock:diagnostic', " +
+                    "payload: ad.collectSponsoredDiagnostics() }); })();");
+            }
+            catch (Exception e) { Debug.WriteLine("Ad diagnostic error: " + e.Message); }
+        }
+
+        private void SetupAdblockDiagnosticMenu()
+        {
+            // Native right-click menu does not rely on YouTube consuming a
+            // Ctrl+Shift+F10 keyboard shortcut. User controls whether to
+            // collect and share the report.
+            webView.CoreWebView2.ContextMenuRequested += (s, e) =>
+            {
+                var menu = webView.CoreWebView2.Environment.CreateContextMenuItem(
+                    "TizenTube: diagnosticar anuncios", null,
+                    CoreWebView2ContextMenuItemKind.Command);
+                menu.CustomItemSelected += async (sender, args) => await RequestAdDiagnosticAsync();
+                e.MenuItems.Add(menu);
             };
         }
 
@@ -497,28 +550,20 @@ namespace TizenTubeWindows
 
         private async Task InjectModsAsync()
         {
-            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            string appDir = Path.Combine(baseDir, "app");
-            if (!Directory.Exists(appDir))
-            {
-                if (Directory.Exists(Path.Combine(baseDir, "..", "app")))
-                    appDir = Path.GetFullPath(Path.Combine(baseDir, "..", "app"));
-                else if (Directory.Exists(Path.Combine(baseDir, "..", "..", "..", "src")))
-                    appDir = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "src"));
-            }
-
-            string bundlePath = Path.Combine(appDir, "mods", "tizentube.bundle.js");
-            string legacyPath = Path.Combine(appDir, "mods", "mod_loader.js");
-            string stylesPath = Path.Combine(appDir, "ui", "styles.css");
-            string scriptContent = "";
-
-            // 1. Inject custom HUD/controls CSS stylesheet into page
-            if (File.Exists(stylesPath))
-            {
-                string css = File.ReadAllText(stylesPath).Replace("\r", "").Replace("\n", " ").Replace("\"", "\\\"");
-                string injectCssScript = $"(() => {{ const s = document.createElement('style'); s.id = 'tizentube-ui-styles'; s.textContent = \"{css}\"; (document.head || document.documentElement).appendChild(s); }})();";
-                await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(injectCssScript);
-            }
+            // All functional mods are part of the actual .exe, not optional
+            // files beside it. Older releases silently fell back to a tiny
+            // JSON.parse patch when a user dragged only the EXE to Desktop.
+            // That created an apparently working YouTube browser with NO
+            // SponsorBlock, DeArrow or full AdBlock — never do that again.
+            string scriptContent = ReadEmbeddedRequired("TizenTube.InjectedBundle");
+            string css = ReadEmbeddedRequired("TizenTube.InjectedStyles");
+            string cssBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(css));
+            string injectCssScript = "(() => { const s = document.createElement('style'); " +
+                "s.id = 'tizentube-ui-styles'; " +
+                "s.textContent = new TextDecoder().decode(Uint8Array.from(atob('" + cssBase64 +
+                "'), c => c.charCodeAt(0))); " +
+                "(document.head || document.documentElement).appendChild(s); })();";
+            await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(injectCssScript);
 
             // 2. Inject initial persisted preferences if available on host disk
             string prefsPath = Path.Combine(appDataDir, "user_preferences.json");
@@ -536,40 +581,24 @@ namespace TizenTubeWindows
                 catch { }
             }
 
-            // 3. Inject standalone IIFE bundle (AdBlock, SponsorBlock, DeArrow, PlaybackEngine, UI)
-            if (File.Exists(bundlePath))
-            {
-                scriptContent = File.ReadAllText(bundlePath);
-            }
-            else if (File.Exists(legacyPath))
-            {
-                scriptContent = File.ReadAllText(legacyPath);
-            }
-            else
-            {
-                // Fallback inline basic JSON.parse hook if bundle is missing
-                scriptContent = @"
-                    (function() {
-                        const originalParse = JSON.parse;
-                        JSON.parse = function(...args) {
-                            const res = originalParse.apply(this, args);
-                            if (res && typeof res === 'object') {
-                                delete res.adPlacements;
-                                delete res.playerAds;
-                                delete res.adSlots;
-                                if (res.playerResponse && typeof res.playerResponse === 'object') {
-                                    delete res.playerResponse.adPlacements;
-                                    delete res.playerResponse.playerAds;
-                                    delete res.playerResponse.adSlots;
-                                }
-                            }
-                            return res;
-                        };
-                    })();
-                ";
-            }
-
+            // 3. Inject the complete, version-matched in-assembly IIFE bundle.
             await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(scriptContent);
+        }
+
+        private static string ReadEmbeddedRequired(string resourceName)
+        {
+            using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName))
+            {
+                if (stream == null)
+                    throw new InvalidOperationException("Required TizenTube component missing from EXE: " + resourceName);
+                using (var reader = new StreamReader(stream, Encoding.UTF8))
+                {
+                    string contents = reader.ReadToEnd();
+                    if (string.IsNullOrWhiteSpace(contents))
+                        throw new InvalidOperationException("Required TizenTube component is empty: " + resourceName);
+                    return contents;
+                }
+            }
         }
 
         private void SetupMemoryTrimming()
