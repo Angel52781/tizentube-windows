@@ -161,6 +161,19 @@ jobs:
           foreach ($required in @('app/mods/tizentube.bundle.js','app/ui/styles.css','app/extension/manifest.json','TizenTubeHost.exe','LICENSE','LEEME_INSTALACION.md')) {
             if (!(Test-Path (Join-Path $pkg $required))) { throw "PACKAGE_MISSING_REQUIRED_FILE_$required" }
           }
+          # The self-contained single-file publish bundles native libraries for
+          # extraction; WebView2Loader.dll is intentionally not a separate ZIP
+          # entry. Prove this exact portable binary can launch WebView2.
+          $smokePath = (Join-Path (Resolve-Path $pkg).Path 'portable-smoke.json')
+          $portable = Start-Process -FilePath (Resolve-Path $exe).Path -WorkingDirectory (Resolve-Path $pkg).Path -ArgumentList @('--smoke-test','18','--telemetry-file',$smokePath) -PassThru -Wait
+          if ($portable.ExitCode -ne 0) { throw "PORTABLE_HOST_EXIT_$($portable.ExitCode)" }
+          if (!(Test-Path $smokePath)) { throw 'PORTABLE_HOST_TELEMETRY_MISSING' }
+          $smoke = Get-Content $smokePath -Raw -Encoding utf8 | ConvertFrom-Json
+          if ($smoke.summary.modsInitializedCount -lt 1) { throw 'PORTABLE_MODS_NOT_RUNNING' }
+          if ($smoke.summary.adblockStyleObserved -lt 1) { throw 'PORTABLE_ADBLOCK_CSS_NOT_LOADED' }
+          Copy-Item $smokePath 'release-out/portable-smoke-evidence.json' -Force
+          Remove-Item $smokePath -Force
+          Write-Host '[OK] Self-contained portable host and bundled WebView2Loader verified by execution'
           $exeSha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "TizenTubeHost.exe SHA256=$exeSha" | Set-Content (Join-Path $pkg 'CHECKSUMS.txt')
           "Commit=$env:GITHUB_SHA" | Add-Content (Join-Path $pkg 'CHECKSUMS.txt')
@@ -180,5 +193,6 @@ jobs:
           path: |
             release-out/TizenTube-Windows-x64-v0.1.0-preview.3.zip
             release-out/SHA256SUMS.txt
+            release-out/portable-smoke-evidence.json
           if-no-files-found: error
           retention-days: 14
