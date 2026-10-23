@@ -150,6 +150,10 @@ namespace TizenTubeWindows
         private long trimCount = 0;
         private long modsInitializedCount = 0;
         private long sponsorBlockSkipCount = 0;
+        // Independent check that document-start cosmetic filtering actually
+        // reaches a loaded WebView2 DOM (not merely bundled at compile time).
+        private long adblockStyleObserved = 0;
+        private long adblockRuntimeObserved = 0;
         private DateTime startTimeUtc = DateTime.UtcNow;
 
         public int ExitCode { get; private set; } = 0;
@@ -289,12 +293,29 @@ namespace TizenTubeWindows
                 Debug.WriteLine($"[Host Navigation] Starting navigation to: {args.Uri}");
             };
 
-            webView.CoreWebView2.NavigationCompleted += (s, args) =>
+            webView.CoreWebView2.NavigationCompleted += async (s, args) =>
             {
                 if (args.IsSuccess)
                 {
                     Console.WriteLine($"[Host Navigation] Navigation completed successfully. HTTP: {args.HttpStatusCode}");
                     Debug.WriteLine($"[Host Navigation] Completed successfully. HTTP: {args.HttpStatusCode}");
+                    if (options.SmokeTest)
+                    {
+                        try
+                        {
+                            string runtime = await webView.CoreWebView2.ExecuteScriptAsync(
+                                "Boolean(window.__TIZENTUBE_LOADER__ && window.__TIZENTUBE_LOADER__.adblock && window.__TIZENTUBE_LOADER__.adblock.options.enabled)");
+                            string style = await webView.CoreWebView2.ExecuteScriptAsync(
+                                "Boolean(document.getElementById('tizentube-adblock-styles'))");
+                            if (runtime == "true") Interlocked.Exchange(ref adblockRuntimeObserved, 1);
+                            if (style == "true") Interlocked.Exchange(ref adblockStyleObserved, 1);
+                            Console.WriteLine($"[Host AdBlock Probe] runtime={runtime}, stylesheet={style}");
+                        }
+                        catch (Exception probeError)
+                        {
+                            Debug.WriteLine("[Host AdBlock Probe] " + probeError.Message);
+                        }
+                    }
                 }
                 else
                 {
@@ -616,6 +637,8 @@ namespace TizenTubeWindows
             sb.AppendLine($"    \"blockedAdRequests\": {Interlocked.Read(ref blockedAdCount)},");
             sb.AppendLine($"    \"emptyWorkingSetTrimCount\": {Interlocked.Read(ref trimCount)},");
             sb.AppendLine($"    \"modsInitializedCount\": {Interlocked.Read(ref modsInitializedCount)},");
+            sb.AppendLine($"    \"adblockRuntimeObserved\": {Interlocked.Read(ref adblockRuntimeObserved)},");
+            sb.AppendLine($"    \"adblockStyleObserved\": {Interlocked.Read(ref adblockStyleObserved)},");
             sb.AppendLine($"    \"sponsorBlockSkipCount\": {Interlocked.Read(ref sponsorBlockSkipCount)}");
             sb.AppendLine("  },");
             sb.AppendLine("  \"processes\": [");

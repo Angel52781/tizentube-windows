@@ -108,6 +108,11 @@ jobs:
           node scripts/measure_process_telemetry.js --validate windows-out/telemetry/standard/memory-telemetry.json
           if (Test-Path windows-out/telemetry/standard/host-internal-telemetry.json) {
             node scripts/measure_process_telemetry.js --validate windows-out/telemetry/standard/host-internal-telemetry.json
+            $hostEvidence = Get-Content windows-out/telemetry/standard/host-internal-telemetry.json -Raw -Encoding utf8 | ConvertFrom-Json
+            if ($hostEvidence.summary.modsInitializedCount -lt 1) { throw 'YOUTUBE_MOD_BUNDLE_NOT_EXECUTED' }
+            if ($hostEvidence.summary.adblockRuntimeObserved -lt 1) { throw 'ADBLOCK_RUNTIME_NOT_ACTIVE_IN_WEBVIEW2' }
+            if ($hostEvidence.summary.adblockStyleObserved -lt 1) { throw 'ADBLOCK_COSMETIC_STYLES_NOT_PRESENT_IN_WEBVIEW2' }
+            Write-Host '[OK] AdBlock runtime and cosmetic styles verified inside real Windows WebView2'
           }
           Get-Content windows-out/telemetry/standard/memory-summary.txt
 
@@ -151,7 +156,7 @@ jobs:
           $exeSha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "TizenTubeHost.exe SHA256=$exeSha" | Set-Content (Join-Path $pkg 'CHECKSUMS.txt')
           "Commit=$env:GITHUB_SHA" | Add-Content (Join-Path $pkg 'CHECKSUMS.txt')
-          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.2.zip'
+          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.3.zip'
           Compress-Archive -Path $pkg -DestinationPath $zip -CompressionLevel Optimal -Force
           if (!(Test-Path $zip)) { throw 'PORTABLE_ZIP_MISSING' }
           $zipSha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -165,7 +170,7 @@ jobs:
         with:
           name: tizentube-windows-x64-portable-preview
           path: |
-            release-out/TizenTube-Windows-x64-v0.1.0-preview.2.zip
+            release-out/TizenTube-Windows-x64-v0.1.0-preview.3.zip
             release-out/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14

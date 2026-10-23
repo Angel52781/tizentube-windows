@@ -377,7 +377,7 @@ async function runFaultToleranceTests() {
     ab.install();
 
     // Normal parsing
-    const res = JSON.parse('{"contents":{"videoId":"test"},"adPlacements":[{"id":"ad"}]}');
+    const res = JSON.parse('{"contents":{"videoId":"test","twoColumnBrowseResultsRenderer":{"tabs":[]}},"adPlacements":[{"id":"ad"}]}');
     assert.strictEqual(res.adPlacements, undefined);
     assert.strictEqual(res.contents.videoId, 'test');
 

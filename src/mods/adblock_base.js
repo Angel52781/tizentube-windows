@@ -28,6 +28,9 @@ export class AdBlockBase {
     this._preAdMuted = null;
     this._origJsonParse = null;
     this._origResponseJson = null;
+    this._domReadyListener = null;
+    this.sponsoredObserver = null;
+    this._sponsoredScanScheduled = false;
   }
 
   /**
@@ -37,13 +40,25 @@ export class AdBlockBase {
     if (!this.options.enabled || this.isHooked) return;
     this.hookJsonParser();
     this.hookFetchResponseJson();
-    if (this.options.cosmeticFilter) {
-      this.injectCosmeticStyles();
-    }
-    if (this.options.autoSkipVideoAds && typeof document !== 'undefined') {
-      this.startAutoSkipObserver();
-    }
+    this.attachDocumentFilters();
     this.isHooked = true;
+  }
+
+  /** WebView2 injects at document creation, often before <body> exists. */
+  attachDocumentFilters() {
+    if (typeof document === 'undefined') return;
+    if (this.options.cosmeticFilter) this.injectCosmeticStyles();
+    if (document.body) {
+      if (this.options.cosmeticFilter) this.startSponsoredCardObserver();
+      if (this.options.autoSkipVideoAds) this.startAutoSkipObserver();
+    } else if (!this._domReadyListener && typeof document.addEventListener === 'function') {
+      this._domReadyListener = () => {
+        this._domReadyListener = null;
+        if (!this.options.enabled) return;
+        this.attachDocumentFilters();
+      };
+      document.addEventListener('DOMContentLoaded', this._domReadyListener, { once: true });
+    }
   }
 
   /**
@@ -55,12 +70,12 @@ export class AdBlockBase {
     if (!this.options.enabled) {
       this.removeCosmeticStyles();
       this.stopAutoSkipObserver();
+      this.stopSponsoredCardObserver();
     } else {
       if (!this.isHooked) {
         this.install();
       } else {
-        if (this.options.cosmeticFilter) this.injectCosmeticStyles();
-        if (this.options.autoSkipVideoAds) this.startAutoSkipObserver();
+        this.attachDocumentFilters();
       }
     }
   }
@@ -82,8 +97,13 @@ export class AdBlockBase {
       // account APIs) even when called from within the YouTube page.
       const youtubePayload = result && typeof result === 'object' && (
         'playerResponse' in result || 'videoDetails' in result || 'streamingData' in result
-        || 'playabilityStatus' in result || 'contents' in result
-        || 'continuationContents' in result || 'responseContext' in result
+        || 'playabilityStatus' in result ||
+        Boolean(result.contents?.twoColumnBrowseResultsRenderer
+          || result.contents?.twoColumnSearchResultsRenderer
+          || result.contents?.singleColumnBrowseResultsRenderer
+          || result.contents?.tvBrowseRenderer)
+        || Boolean(result.continuationContents?.richGridContinuation
+          || result.continuationContents?.sectionListContinuation)
       );
       if (self.options.enabled && self.options.blockAdsInJson && youtubePayload) {
         try {
@@ -117,7 +137,8 @@ export class AdBlockBase {
       try {
         const url = new URL(this.url);
         if ((url.hostname === 'www.youtube.com' || url.hostname === 'youtube.com'
-          || url.hostname === 'm.youtube.com') && url.pathname.startsWith('/youtubei/v1/player')) {
+          || url.hostname === 'm.youtube.com') &&
+          /^\/youtubei\/v1\/(player|browse|search|next)(?:\/|$)/.test(url.pathname)) {
           self.cleanAdData(result);
         }
       } catch (_) { /* Malformed or absent URL: never break playback. */ }
@@ -207,18 +228,12 @@ export class AdBlockBase {
 
         // Classical section list
         if (Array.isArray(tabContent.sectionListRenderer?.contents)) {
-          tabContent.sectionListRenderer.contents = tabContent.sectionListRenderer.contents.filter(
-            sec => !sec.adSlotRenderer && !sec.feedNudgeRenderer
-          );
+          tabContent.sectionListRenderer.contents = this.removeSponsoredItems(tabContent.sectionListRenderer.contents);
         }
 
         // Modern rich grid feed (desktop YouTube homepage)
         if (Array.isArray(tabContent.richGridRenderer?.contents)) {
-          tabContent.richGridRenderer.contents = tabContent.richGridRenderer.contents.filter(item => {
-            const inner = item.richItemRenderer?.content;
-            if (!inner) return !item.adSlotRenderer;
-            return !inner.adSlotRenderer && !inner.inFeedAdRenderer && !inner.feedNudgeRenderer;
-          });
+          tabContent.richGridRenderer.contents = this.removeSponsoredItems(tabContent.richGridRenderer.contents);
         }
       }
     }
@@ -227,7 +242,7 @@ export class AdBlockBase {
     const tvSections = contents.tvBrowseRenderer?.content?.tvSurfaceContentRenderer?.content?.sectionListRenderer?.contents;
     if (Array.isArray(tvSections)) {
       contents.tvBrowseRenderer.content.tvSurfaceContentRenderer.content.sectionListRenderer.contents =
-        tvSections.filter(sec => !sec.adSlotRenderer && !sec.feedNudgeRenderer);
+        this.removeSponsoredItems(tvSections);
     }
   }
 
@@ -241,9 +256,7 @@ export class AdBlockBase {
     if (Array.isArray(searchSections)) {
       for (const section of searchSections) {
         if (Array.isArray(section.itemSectionRenderer?.contents)) {
-          section.itemSectionRenderer.contents = section.itemSectionRenderer.contents.filter(item => {
-            return !item.adSlotRenderer && !item.promotedSparklesWebRenderer && !item.searchPyvRenderer;
-          });
+          section.itemSectionRenderer.contents = this.removeSponsoredItems(section.itemSectionRenderer.contents);
         }
       }
     }
@@ -256,17 +269,28 @@ export class AdBlockBase {
   cleanContinuationAds(continuations) {
     if (!continuations) return;
     if (Array.isArray(continuations.sectionListContinuation?.contents)) {
-      continuations.sectionListContinuation.contents = continuations.sectionListContinuation.contents.filter(
-        item => !item.adSlotRenderer && !item.feedNudgeRenderer
-      );
+      continuations.sectionListContinuation.contents = this.removeSponsoredItems(continuations.sectionListContinuation.contents);
     }
     if (Array.isArray(continuations.richGridContinuation?.contents)) {
-      continuations.richGridContinuation.contents = continuations.richGridContinuation.contents.filter(item => {
-        const inner = item.richItemRenderer?.content;
-        if (!inner) return !item.adSlotRenderer;
-        return !inner.adSlotRenderer && !inner.inFeedAdRenderer;
-      });
+      continuations.richGridContinuation.contents = this.removeSponsoredItems(continuations.richGridContinuation.contents);
     }
+  }
+
+  /** Only remove recognized advertisement renderers, not ordinary videos. */
+  removeSponsoredItems(items) {
+    const adKeys = [
+      'adSlotRenderer', 'inFeedAdRenderer', 'displayAdRenderer',
+      'promotedVideoRenderer', 'promotedSparklesWebRenderer',
+      'videoMastheadAdRenderer', 'videoMastheadAdV3Renderer',
+      'searchPyvRenderer'
+    ];
+    return items.filter(item => {
+      const nested = [item, item?.richItemRenderer?.content,
+        item?.richSectionRenderer?.content, item?.itemSectionRenderer?.content];
+      const sponsored = nested.some(part => part && adKeys.some(key => Object.hasOwn(part, key)));
+      if (sponsored) this.blockedCount++;
+      return !sponsored;
+    });
   }
 
   /**
@@ -288,12 +312,25 @@ export class AdBlockBase {
       .ytp-ad-image-overlay,
       ytd-promoted-sparkles-web-renderer,
       ytd-promoted-video-renderer,
+      ytd-display-ad-renderer,
+      ytd-compact-promoted-video-renderer,
+      ytd-search-pyv-renderer,
+      ytd-video-masthead-ad-renderer,
+      ytd-video-masthead-ad-v3-renderer,
+      ytd-video-masthead-ad-primary-video-renderer,
       ytd-banner-promo-renderer,
       ytd-ad-slot-renderer,
       #player-ads,
       #masthead-ad,
       ytd-companion-slot-renderer,
-      ytd-in-feed-ad-layout-renderer {
+      ytd-in-feed-ad-layout-renderer,
+      ytd-rich-item-renderer:has(ytd-ad-slot-renderer),
+      ytd-rich-item-renderer:has(ytd-in-feed-ad-layout-renderer),
+      ytd-rich-item-renderer:has(ytd-display-ad-renderer),
+      ytd-rich-section-renderer:has(ytd-ad-slot-renderer),
+      ytd-rich-section-renderer:has(ytd-video-masthead-ad-v3-renderer),
+      ytd-rich-section-renderer:has(yt-promoted-card),
+      [data-tizentube-sponsored="true"] {
         display: none !important;
         visibility: hidden !important;
         height: 0 !important;
@@ -305,6 +342,46 @@ export class AdBlockBase {
     if (target) {
       target.appendChild(style);
     }
+  }
+
+  /** Remove the enclosing feed card, not just its inner sponsored banner. */
+  scanSponsoredCards() {
+    if (!this.options.enabled || !this.options.cosmeticFilter || typeof document === 'undefined') return;
+    const markers = [
+      'ytd-ad-slot-renderer', 'ytd-in-feed-ad-layout-renderer',
+      'ytd-display-ad-renderer', 'ytd-promoted-video-renderer',
+      'ytd-promoted-sparkles-web-renderer', 'ytd-video-masthead-ad-v3-renderer'
+    ];
+    if (typeof document.querySelectorAll !== 'function') return;
+    for (const marker of document.querySelectorAll(markers.join(','))) {
+      const card = marker.closest?.('ytd-rich-item-renderer, ytd-rich-section-renderer, ytd-item-section-renderer');
+      if (card && card.getAttribute('data-tizentube-sponsored') !== 'true') {
+        card.setAttribute('data-tizentube-sponsored', 'true');
+        this.blockedCount++;
+      }
+    }
+  }
+
+  startSponsoredCardObserver() {
+    if (this.sponsoredObserver || typeof MutationObserver === 'undefined' || !document.body) return;
+    this.scanSponsoredCards();
+    this.sponsoredObserver = new MutationObserver(() => {
+      if (this._sponsoredScanScheduled) return;
+      this._sponsoredScanScheduled = true;
+      const run = () => {
+        this._sponsoredScanScheduled = false;
+        this.scanSponsoredCards();
+      };
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+      else setTimeout(run, 50);
+    });
+    this.sponsoredObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  stopSponsoredCardObserver() {
+    this.sponsoredObserver?.disconnect();
+    this.sponsoredObserver = null;
+    this._sponsoredScanScheduled = false;
   }
 
   /**
@@ -416,6 +493,11 @@ export class AdBlockBase {
    */
   dispose() {
     this.stopAutoSkipObserver();
+    this.stopSponsoredCardObserver();
+    if (this._domReadyListener && typeof document !== 'undefined') {
+      document.removeEventListener?.('DOMContentLoaded', this._domReadyListener);
+      this._domReadyListener = null;
+    }
     this.removeCosmeticStyles();
     if (this._origJsonParse && typeof JSON !== 'undefined') {
       JSON.parse = this._origJsonParse;
