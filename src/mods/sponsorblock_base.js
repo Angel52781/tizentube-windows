@@ -83,6 +83,7 @@ export class SponsorBlockBase {
    */
   setEnabled(enabled) {
     this.options.enabled = Boolean(enabled);
+    if (!this.options.enabled) this.currentSegments = [];
   }
 
   /**
@@ -119,11 +120,15 @@ export class SponsorBlockBase {
 
     try {
       const segments = await this.fetchSegments(videoId);
-      this.currentSegments = segments;
+      // In YouTube's SPA, earlier network replies can arrive after navigating
+      // to the next video. Never associate stale sponsor segments with it.
+      if (videoId === this.currentVideoId && this.options.enabled) {
+        this.currentSegments = segments;
+      }
     } catch (err) {
       // SponsorBlock API downtime must never break video playback (fail-open)
       console.warn(`[SponsorBlock] Query failed for ${videoId} (fail-open):`, err.message);
-      this.currentSegments = [];
+      if (videoId === this.currentVideoId) this.currentSegments = [];
     }
   }
 

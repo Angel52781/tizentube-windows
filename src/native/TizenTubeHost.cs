@@ -162,7 +162,8 @@ namespace TizenTubeWindows
             this.Size = new Size(1280, 720);
             this.MinimumSize = new Size(800, 500);
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.Icon = SystemIcons.Application;
+            try { this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; }
+            catch { this.Icon = SystemIcons.Application; }
 
             if (this.options.HeadlessMode)
             {

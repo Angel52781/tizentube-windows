@@ -27,6 +27,7 @@ export class AdBlockBase {
     this._preAdRate = null;
     this._preAdMuted = null;
     this._origJsonParse = null;
+    this._origResponseJson = null;
   }
 
   /**
@@ -35,6 +36,7 @@ export class AdBlockBase {
   install() {
     if (!this.options.enabled || this.isHooked) return;
     this.hookJsonParser();
+    this.hookFetchResponseJson();
     if (this.options.cosmeticFilter) {
       this.injectCosmeticStyles();
     }
@@ -76,7 +78,14 @@ export class AdBlockBase {
 
     JSON.parse = function (...args) {
       const result = originalParse.apply(this, args);
-      if (self.options.enabled && self.options.blockAdsInJson && result && typeof result === 'object') {
+      // Avoid deleting similarly named fields in unrelated services (e.g.
+      // account APIs) even when called from within the YouTube page.
+      const youtubePayload = result && typeof result === 'object' && (
+        'playerResponse' in result || 'videoDetails' in result || 'streamingData' in result
+        || 'playabilityStatus' in result || 'contents' in result
+        || 'continuationContents' in result || 'responseContext' in result
+      );
+      if (self.options.enabled && self.options.blockAdsInJson && youtubePayload) {
         try {
           self.cleanAdData(result);
         } catch (err) {
@@ -84,6 +93,34 @@ export class AdBlockBase {
           console.warn('[AdBlock] Safe parse cleanup error (fail-open):', err.message);
         }
       }
+      return result;
+    };
+  }
+
+  /**
+   * Modern YouTube desktop decodes its /youtubei/v1/player responses with
+   * Response.json(), which does not need to call the page's JSON.parse hook.
+   * Intercept only YouTube player responses; avoid modifying other sites,
+   * account/OAuth responses, or arbitrary API payloads.
+   */
+  hookFetchResponseJson() {
+    if (typeof Response === 'undefined' || !Response.prototype?.json || this._origResponseJson) return;
+    const original = Response.prototype.json;
+    this._origResponseJson = original;
+    const self = this;
+
+    Response.prototype.json = async function (...args) {
+      const result = await original.apply(this, args);
+      if (!self.options.enabled || !self.options.blockAdsInJson || !result || typeof result !== 'object') {
+        return result;
+      }
+      try {
+        const url = new URL(this.url);
+        if ((url.hostname === 'www.youtube.com' || url.hostname === 'youtube.com'
+          || url.hostname === 'm.youtube.com') && url.pathname.startsWith('/youtubei/v1/player')) {
+          self.cleanAdData(result);
+        }
+      } catch (_) { /* Malformed or absent URL: never break playback. */ }
       return result;
     };
   }
@@ -300,9 +337,8 @@ export class AdBlockBase {
         '.ytp-skip-ad-button',
         '.ytp-skip-ad-button-modern',
         '.videoAdUiSkipButton',
-        '.ytp-ad-preview-container',
         'button.ytp-ad-skip-button-modern',
-        '.ytp-ad-text'
+        'button.ytp-skip-ad-button'
       ];
 
       for (const sel of skipSelectors) {
@@ -384,6 +420,10 @@ export class AdBlockBase {
     if (this._origJsonParse && typeof JSON !== 'undefined') {
       JSON.parse = this._origJsonParse;
       this._origJsonParse = null;
+    }
+    if (this._origResponseJson && typeof Response !== 'undefined') {
+      Response.prototype.json = this._origResponseJson;
+      this._origResponseJson = null;
     }
     this.isHooked = false;
   }

@@ -26,6 +26,11 @@ if %errorlevel% equ 0 (
 )
 
 echo [2/4] Compiling Native C# Host (.NET / WebView2)...
+python scripts\build_icon.py
+if errorlevel 1 (
+    echo [ERROR] Cannot generate application icon.
+    exit /b 1
+)
 where dotnet >nul 2>nul
 if %errorlevel% equ 0 (
     echo Found .NET SDK. Publishing TizenTubeHost (win-x64)...

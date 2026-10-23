@@ -43,6 +43,12 @@ jobs:
         run: |
           npm test
 
+      - name: Generate Windows application icon
+        shell: pwsh
+        run: |
+          python scripts/build_icon.py
+          if (!(Test-Path assets/TizenTube.ico)) { throw 'APP_ICON_MISSING' }
+
       - name: Verify PE32+ reproducible builder and bit-exact determinism
         shell: pwsh
         run: |
@@ -145,7 +151,7 @@ jobs:
           $exeSha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "TizenTubeHost.exe SHA256=$exeSha" | Set-Content (Join-Path $pkg 'CHECKSUMS.txt')
           "Commit=$env:GITHUB_SHA" | Add-Content (Join-Path $pkg 'CHECKSUMS.txt')
-          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.1.zip'
+          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.2.zip'
           Compress-Archive -Path $pkg -DestinationPath $zip -CompressionLevel Optimal -Force
           if (!(Test-Path $zip)) { throw 'PORTABLE_ZIP_MISSING' }
           $zipSha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -159,7 +165,7 @@ jobs:
         with:
           name: tizentube-windows-x64-portable-preview
           path: |
-            release-out/TizenTube-Windows-x64-v0.1.0-preview.1.zip
+            release-out/TizenTube-Windows-x64-v0.1.0-preview.2.zip
             release-out/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14

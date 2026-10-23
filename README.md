@@ -1,6 +1,14 @@
 # TizenTube Windows
 
-**Descarga para probar en Windows 10/11 x64:** [Releases / v0.1.0-preview.1](https://github.com/Angel52781/tizentube-windows/releases/tag/v0.1.0-preview.1). Descargar el ZIP de **Assets**, extraer toda la carpeta y ejecutar `TizenTubeHost.exe`. Ver [instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md).
+[![Descargar TizenTube Windows — ZIP portable](https://img.shields.io/badge/%E2%AC%87%20DESCARGAR-Windows%2010%2F11%20x64-087fca?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.2/TizenTube-Windows-x64-v0.1.0-preview.2.zip)
+
+**[Descarga directa para Windows (versión de prueba)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.2/TizenTube-Windows-x64-v0.1.0-preview.2.zip)** · [Instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md) · [Todas las versiones](https://github.com/Angel52781/tizentube-windows/releases)
+
+> **¿Windows muestra «Windows protegió su PC»?** Esta versión de prueba todavía no tiene firma digital de un editor reconocido. Consulta [por qué sucede y las opciones de firma](docs/SMARTSCREEN_AND_SIGNING.md). No implica por sí mismo que el archivo sea malicioso; verifica siempre el origen y el SHA-256.
+
+**Descarga para probar en Windows 10/11 x64:** [Releases / v0.1.0-preview.2](https://github.com/Angel52781/tizentube-windows/releases/tag/v0.1.0-preview.2). Descargar el ZIP de **Assets**, extraer toda la carpeta y ejecutar `TizenTubeHost.exe`. Ver [instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md).
+
+**Mejoras de preview.2:** se corrigió la detección tardía del reproductor que impedía a SponsorBlock recibir eventos de tiempo; se reforzó el filtrado de respuestas de YouTube desktop y la restauración de cambios al desactivar AdBlock. Incluye icono propio. Son mejoras comprobadas con pruebas de regresión y CI; aún deben validarse frente a anuncios y segmentos reales en sesiones de uso.
 
 Esta es una **versión personal experimental, no estable**: usa YouTube de escritorio dentro de WebView2 con modificaciones. No pretende replicar aún la interfaz Android/Chromecast, ni garantiza bloquear todos los anuncios. Las pruebas funcionales reales en el equipo del usuario y las mediciones integrales de RAM siguen pendientes.
 

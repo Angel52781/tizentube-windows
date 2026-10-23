@@ -2,6 +2,7 @@ references/
 evidence/*.json
 evidence/*.txt
 node_modules/
+assets/*.ico
 .ci-staging/
 dist/
 out/

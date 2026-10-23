@@ -275,7 +275,7 @@ export class AppUI {
       } else if (e.key === 'b' || e.key === 'B') {
         if (this.sponsorblock) {
           e.preventDefault();
-          const next = !this.sponsorblock.autoSkip;
+          const next = !this.sponsorblock.options.autoSkip;
           this.sponsorblock.setAutoSkip(next);
           this.settingsModal.settings.sponsorblock.autoSkip = next;
           this.savePreferences(this.settingsModal.getSettings());
@@ -289,7 +289,7 @@ export class AppUI {
       } else if (e.key === 'a' || e.key === 'A') {
         if (this.adblock) {
           e.preventDefault();
-          const next = !this.adblock.enabled;
+          const next = !this.adblock.options.enabled;
           this.adblock.setEnabled(next);
           this.settingsModal.settings.adblock.enabled = next;
           this.savePreferences(this.settingsModal.getSettings());
@@ -303,7 +303,7 @@ export class AppUI {
       } else if (e.key === 'd' || e.key === 'D') {
         if (this.dearrow) {
           e.preventDefault();
-          const next = !this.dearrow.enabled;
+          const next = !this.dearrow.options.enabled;
           this.dearrow.setEnabled(next);
           this.settingsModal.settings.dearrow.enabled = next;
           this.savePreferences(this.settingsModal.getSettings());
@@ -463,6 +463,9 @@ export class AppUI {
       this.sponsorblock.setAutoSkip(settings.sponsorblock.autoSkip);
       this.sponsorblock.setCategories(settings.sponsorblock.categories || []);
       this.sponsorblock.options.showNotice = Boolean(settings.sponsorblock.showNotice);
+      if (settings.sponsorblock.enabled && this.currentVideoId && !this.sponsorblock.currentSegments.length) {
+        void this.sponsorblock.setVideo(this.currentVideoId);
+      }
 
       // Refresh seekbar markers
       if (this.playback?.state?.duration) {

@@ -22,6 +22,7 @@ export class PlaybackEngine {
     this._videoListeners = [];
     this._onFsChange = null;
     this._onKeyDown = null;
+    this._onDomReady = null;
     this.state = {
       isPlaying: false,
       currentTime: 0,
@@ -45,7 +46,18 @@ export class PlaybackEngine {
       this.attachMediaSession();
     }
     if (typeof document !== 'undefined') {
-      this.attachVideoFinder();
+      // AddScriptToExecuteOnDocumentCreatedAsync runs before document.body
+      // exists. A one-off query here misses every subsequent YouTube video,
+      // leaving SponsorBlock without timeupdate events.
+      if (document.body) {
+        this.attachVideoFinder();
+      } else if (typeof window !== 'undefined') {
+        this._onDomReady = () => {
+          this._onDomReady = null;
+          this.attachVideoFinder();
+        };
+        window.addEventListener('DOMContentLoaded', this._onDomReady, { once: true });
+      }
       this.attachKeyboardShortcuts();
       this.attachFullscreenWatcher();
     }
@@ -55,6 +67,7 @@ export class PlaybackEngine {
    * Discovers and binds to YouTube's HTML5 video element with debouncing.
    */
   attachVideoFinder() {
+    if (this.videoObserver) return;
     let pendingFrame = false;
     const findVideo = () => {
       pendingFrame = false;
@@ -77,9 +90,9 @@ export class PlaybackEngine {
           }
         }
       });
-      // Optimize observer: watch only player container if present to reduce overhead
-      const container = document.querySelector('#movie_player') || document.body;
-      this.videoObserver.observe(container, { childList: true, subtree: true });
+      // YouTube re-creates #movie_player on SPA navigation; watch the stable
+      // body rather than a player subtree that becomes detached.
+      this.videoObserver.observe(document.body, { childList: true, subtree: true });
     }
   }
 
@@ -570,6 +583,10 @@ export class PlaybackEngine {
    */
   dispose() {
     this.unbindVideoElement();
+    if (typeof window !== 'undefined' && this._onDomReady) {
+      window.removeEventListener('DOMContentLoaded', this._onDomReady);
+      this._onDomReady = null;
+    }
     if (this.videoObserver) {
       this.videoObserver.disconnect();
       this.videoObserver = null;
