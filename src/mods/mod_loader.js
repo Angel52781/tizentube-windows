@@ -38,6 +38,10 @@ export class ModLoader {
     });
 
     this.initialized = false;
+    this._mountRetryTimer = null;
+    this._mountAttempts = 0;
+    this._mountEventHandler = null;
+    this._viewingMountReported = false;
   }
 
   /**
@@ -64,16 +68,41 @@ export class ModLoader {
       }
     });
 
-    // 3. Mount UI if DOM is available
-    if (typeof document !== 'undefined' && document.body) {
-      this.ui.mount(document.body);
-      this.viewing.mount();
-    } else if (typeof window !== 'undefined') {
-      window.addEventListener('DOMContentLoaded', () => {
-        this.ui.mount(document.body);
-        this.viewing.mount();
-      });
+    // 3. Mount the native playback experience INDEPENDENTLY of custom UI.
+    // WebView2 document-start injection sometimes precedes body but misses a
+    // DOMContentLoaded event during YouTube navigation. Worse, any exception
+    // in AppUI.mount used to prevent ViewingExperience.mount entirely: PiP
+    // button disappears and theater preference is never tracked.
+    const mountIfReady = () => {
+      if (typeof document === 'undefined' || !document.body) return false;
+      try {
+        if (!this.viewing.mounted) this.viewing.mount();
+        if (this.viewing.mounted && !this._viewingMountReported) {
+          this._viewingMountReported = true;
+          this.ipc.send('viewing:mounted', { enabled: true });
+        }
+      } catch (err) {
+        console.warn('[TizenTube] ViewingExperience mount retry:', String(err));
+      }
+      try {
+        if (!this.ui.isMounted) this.ui.mount(document.body);
+      } catch (err) {
+        console.warn('[TizenTube] Optional UI mount retry:', String(err));
+      }
+      return Boolean(this.viewing.mounted && this.ui.isMounted);
+    };
+    const retryMount = () => {
+      this._mountRetryTimer = null;
+      if (mountIfReady() || this._mountAttempts++ >= 40) return;
+      this._mountRetryTimer = setTimeout(retryMount, 400);
+      this._mountRetryTimer?.unref?.();
+    };
+    this._mountEventHandler = mountIfReady;
+    if (typeof window !== 'undefined') {
+      window.addEventListener('DOMContentLoaded', mountIfReady, { once: true });
+      window.addEventListener('load', mountIfReady, { once: true });
     }
+    retryMount();
 
     // 4. Setup IPC commands from Native Host
     this.ipc.on('playback:command', (payload) => {
@@ -122,6 +151,11 @@ export class ModLoader {
    * Cleans up all mod listeners, timers, caches, and injected DOM elements.
    */
   dispose() {
+    if (this._mountRetryTimer) clearTimeout(this._mountRetryTimer);
+    if (this._mountEventHandler && typeof window !== 'undefined') {
+      window.removeEventListener?.('DOMContentLoaded', this._mountEventHandler);
+      window.removeEventListener?.('load', this._mountEventHandler);
+    }
     if (this.viewing?.dispose) this.viewing.dispose();
     if (this.adblock?.dispose) this.adblock.dispose();
     if (this.sponsorblock?.dispose) this.sponsorblock.dispose();
