@@ -67,6 +67,11 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or !(Test-Path windows-experience-host/TizenTubeHost.exe)) {
             throw 'WINDOWS_EXE_BUILD_FAILED'
           }
+      - name: Prove real home feed and two independently playable selected videos
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File ./scripts/ci_windows_navigation_playback.ps1 -Executable windows-experience-host/TizenTubeHost.exe -EvidenceDirectory windows-experience-evidence
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_REAL_MULTI_VIDEO_JOURNEY_FAILED' }
       - name: Press real Windows Arrow keys and Space inside WebView2
         shell: pwsh
         run: |
