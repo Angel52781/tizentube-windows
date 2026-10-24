@@ -1043,7 +1043,7 @@ namespace TizenTubeWindows
                 if (options.PreferencesSetupProbe)
                 {
                     string write = "(() => { const u=window.__TIZENTUBE_LOADER__?.ui;" +
-                        "if (!u?.isMounted) return false;" +
+                        "if (!u?.settingsModal?.getSettings || !u?.savePreferences) return false;" +
                         "const s=u.settingsModal.getSettings();" +
                         "s.ui.highContrast=true; s.sponsorblock.autoSkip=false;" +
                         "s.playback.defaultSpeed=1.5;" +
@@ -1056,7 +1056,7 @@ namespace TizenTubeWindows
                 if (options.PreferencesRestartProbe)
                 {
                     string read = "(() => {const u=window.__TIZENTUBE_LOADER__?.ui;" +
-                        "if (!u?.isMounted) return null;const s=u.settingsModal.getSettings();" +
+                        "if (!u?.settingsModal?.getSettings) return null;const s=u.settingsModal.getSettings();" +
                         "return {highContrast:s.ui.highContrast," +
                         "autoSkip:s.sponsorblock.autoSkip,defaultSpeed:s.playback.defaultSpeed," +
                         "hostPrefsPresent:!!window.__TIZENTUBE_INITIAL_PREFERENCES__};})()";
