@@ -58,6 +58,11 @@ YouTube, decodificación de un archivo comprimido ni la corrección visual de
 F01/F02 con el reproductor real de YouTube**. Los resultados de GitHub
 Actions posteriores a estos cambios aún no están disponibles al redactar.
 
+La segunda versión de la prueba también guarda cinco capturas PNG reales
+de `CoreWebView2.CapturePreviewAsync` y verifica un píxel central no negro
+en cada etapa. Es una comprobación limitada de superficie visible en el
+fixture local; no se extrapola al streaming de YouTube.
+
 Los workflows anteriores compilaban el host pero fallaban en reproducción:
 el E2E no pudo abrir el primer vídeo desde la portada; el control
 `UnmodifiedWebView` alcanzó el vídeo con `readyState=0`, `videoWidth=0`

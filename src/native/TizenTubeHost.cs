@@ -1531,12 +1531,32 @@ namespace TizenTubeWindows
                     "playerInBody:floatDiag?.playerInBody??false," +
                     "fullscreen:!!(document.fullscreenElement || document.querySelector('.ytp-fullscreen') || window.__ttNativeFullscreen)};})()";
 
+                // A decoded mediaWidth/time-only check can miss a black GPU
+                // compositor surface. Use actual WebView2 screenshots of the
+                // locally generated colored frames on every native transition.
+                async Task CaptureVisibleFixtureAsync(string stage)
+                {
+                    if (!options.FloatingFixtureProbe) return;
+                    string screenshotPath = Path.Combine(folder, $"cycle-{stage}.png");
+                    using (var stream = File.Create(screenshotPath))
+                        await webView.CoreWebView2.CapturePreviewAsync(
+                            CoreWebView2CapturePreviewImageFormat.Png, stream);
+                    using (var image = new Bitmap(screenshotPath))
+                    {
+                        var center = image.GetPixel(image.Width / 2, image.Height / 2);
+                        if (center.R + center.G + center.B < 30)
+                            throw new InvalidOperationException(
+                                $"OFFLINE_MEDIA_BLACK_CENTER:{stage}:{center.R},{center.G},{center.B}");
+                    }
+                }
+
                 await Task.Delay(10000);
                 if (IsDisposed || webView?.CoreWebView2 == null) return;
 
                 // 1. Normal
                 string s1 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
                 File.WriteAllText(Path.Combine(folder, "cycle-01-normal.json"), s1);
+                await CaptureVisibleFixtureAsync("01-normal");
 
                 // 2. Theater
                 await webView.CoreWebView2.ExecuteScriptAsync(
@@ -1547,12 +1567,14 @@ namespace TizenTubeWindows
                 await Task.Delay(1200);
                 string s2 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
                 File.WriteAllText(Path.Combine(folder, "cycle-02-theater.json"), s2);
+                await CaptureVisibleFixtureAsync("02-theater");
 
                 // 3. Floating
                 await ToggleFloatingWindowAsync(false);
                 await Task.Delay(1500);
                 string s3 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
                 File.WriteAllText(Path.Combine(folder, "cycle-03-floating.json"), s3);
+                await CaptureVisibleFixtureAsync("03-floating");
 
                 // 4. Fullscreen
                 await webView.CoreWebView2.ExecuteScriptAsync(
@@ -1563,6 +1585,7 @@ namespace TizenTubeWindows
                 await Task.Delay(1500);
                 string s4 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
                 File.WriteAllText(Path.Combine(folder, "cycle-04-fullscreen.json"), s4);
+                await CaptureVisibleFixtureAsync("04-fullscreen");
 
                 // 5. Return
                 await webView.CoreWebView2.ExecuteScriptAsync(
@@ -1573,6 +1596,7 @@ namespace TizenTubeWindows
                 await Task.Delay(1500);
                 string s5 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
                 File.WriteAllText(Path.Combine(folder, "cycle-05-return.json"), s5);
+                await CaptureVisibleFixtureAsync("05-return");
 
                 var summary = new {
                     success = true,
