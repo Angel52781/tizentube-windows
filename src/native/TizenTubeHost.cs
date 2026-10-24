@@ -44,6 +44,7 @@ namespace TizenTubeWindows
         public bool PreferencesRestartProbe { get; set; } = false;
         public bool NavigationBackProbe { get; set; } = false;
         public bool KeyboardShortcutsProbe { get; set; } = false;
+        public bool NavigationPlaybackProbe { get; set; } = false;
 
         public static HostOptions Parse(string[] args)
         {
@@ -136,6 +137,7 @@ namespace TizenTubeWindows
                 else if (arg == "--preferences-restart-probe") options.PreferencesRestartProbe = true;
                 else if (arg == "--navigation-back-probe") options.NavigationBackProbe = true;
                 else if (arg == "--keyboard-shortcuts-probe") options.KeyboardShortcutsProbe = true;
+                else if (arg == "--navigation-playback-probe") options.NavigationPlaybackProbe = true;
                 else if (arg == "--help" || arg == "-h")
                 {
                     options.ShowHelp = true;
@@ -242,6 +244,7 @@ namespace TizenTubeWindows
         private bool theaterProbeStarted = false;
         private bool preferencesProbeStarted = false;
         private bool keyboardProbeStarted = false;
+        private bool playbackJourneyProbeStarted = false;
         private long blockedAdCount = 0;
         private long trimCount = 0;
         private long modsInitializedCount = 0;
@@ -496,6 +499,16 @@ namespace TizenTubeWindows
                         if (!nav.IsSuccess || keyboardProbeStarted || IsDisposed) return;
                         keyboardProbeStarted = true;
                         await CaptureKeyboardShortcutsProbeAsync();
+                    };
+                }
+
+                if (options.NavigationPlaybackProbe)
+                {
+                    webView.CoreWebView2.NavigationCompleted += async (sender, nav) =>
+                    {
+                        if (!nav.IsSuccess || playbackJourneyProbeStarted || IsDisposed) return;
+                        playbackJourneyProbeStarted = true;
+                        await CaptureNavigationPlaybackProbeAsync();
                     };
                 }
 
@@ -875,6 +888,80 @@ namespace TizenTubeWindows
                 }
             }
             finally { ResumeLayout(); }
+        }
+
+        private async Task CaptureNavigationPlaybackProbeAsync()
+        {
+            // Acceptance: start from HOME, click an actual feed thumbnail, play
+            // and then click a different related video. No test-only watch URL.
+            // Only anonymous numerical media state is exported.
+            try
+            {
+                string folder = Path.GetDirectoryName(options.TelemetryFilePath ?? "");
+                if (string.IsNullOrEmpty(folder)) folder = appDataDir;
+                Directory.CreateDirectory(folder);
+                await Task.Delay(13000);
+                if (IsDisposed || webView?.CoreWebView2 == null) return;
+
+                string home = "(() => ({path:location.pathname," +
+                    "ytApp:!!document.querySelector('ytd-app')," +
+                    "feedLinks:document.querySelectorAll(" +
+                    "'ytd-rich-grid-media a#thumbnail[href*=\\\"watch\\\"],ytd-video-renderer a#video-title').length}))()";
+                File.WriteAllText(Path.Combine(folder, "journey-home.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(home));
+
+                string firstClick = "(() => {const a=[...document.querySelectorAll(" +
+                    "'ytd-rich-grid-media a#thumbnail,ytd-video-renderer a#video-title')]" +
+                    ".find(x=>x.href && x.href.includes('/watch?v='));" +
+                    "if(!a)return {clicked:false};" +
+                    "const id=new URL(a.href).searchParams.get('v');a.click();" +
+                    "return {clicked:true,id};})()";
+                File.WriteAllText(Path.Combine(folder, "journey-first-click.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(firstClick));
+
+                await Task.Delay(14000);
+                string media = "(() => {const v=document.querySelector('video.html5-main-video');" +
+                    "const id=new URL(location.href).searchParams.get('v');" +
+                    "return {id,watch:location.pathname==='/watch',readyState:v?.readyState??0," +
+                    "width:v?.videoWidth??0,time:v?.currentTime??0,paused:v?.paused??true," +
+                    "duration:Number.isFinite(v?.duration)?v.duration:0," +
+                    "error:!!document.querySelector('.ytp-error')};})()";
+                // A click can reach /watch with playback paused due autoplay
+                // policies. Trigger the same player play control as a user.
+                await webView.CoreWebView2.ExecuteScriptAsync(
+                    "document.querySelector('video.html5-main-video')?.play()?.catch(()=>{});");
+                await Task.Delay(2800);
+                File.WriteAllText(Path.Combine(folder, "journey-first-before.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(media));
+                await Task.Delay(3900);
+                File.WriteAllText(Path.Combine(folder, "journey-first-after.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(media));
+
+                string secondClick = "(() => {const current=new URL(location.href).searchParams.get('v');" +
+                    "const a=[...document.querySelectorAll(" +
+                    "'ytd-compact-video-renderer a#thumbnail,ytd-watch-next-secondary-results-renderer a#thumbnail')]" +
+                    ".find(x=>{try{return new URL(x.href).searchParams.get('v')!==current}" +
+                    "catch{return false}});" +
+                    "if(!a)return {clicked:false};" +
+                    "const id=new URL(a.href).searchParams.get('v');a.click();" +
+                    "return {clicked:true,id};})()";
+                File.WriteAllText(Path.Combine(folder, "journey-second-click.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(secondClick));
+                await Task.Delay(15000);
+                await webView.CoreWebView2.ExecuteScriptAsync(
+                    "document.querySelector('video.html5-main-video')?.play()?.catch(()=>{});");
+                await Task.Delay(2900);
+                File.WriteAllText(Path.Combine(folder, "journey-second-before.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(media));
+                await Task.Delay(4000);
+                File.WriteAllText(Path.Combine(folder, "journey-second-after.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(media));
+                Console.WriteLine("[Host Journey] Guest home/feed/video-to-video evidence exported");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("[Host Journey] " + ex.Message);
+            }
         }
 
         private async Task CaptureKeyboardShortcutsProbeAsync()
