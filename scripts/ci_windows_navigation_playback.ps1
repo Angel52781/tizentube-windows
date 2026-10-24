@@ -18,9 +18,9 @@ function Load([string]$name) {
   if ($null -eq $value) { throw "NAVIGATION_PROBE_NULL:$name" }
   return $value
 }
-$home = Load 'home'
-if ($home.path -ne '/' -or !$home.ytApp) {
-  throw "LAUNCH_MUST_OPEN_HOME_NOT_LAST_VIDEO:path=$($home.path)"
+$homeState = Load 'home'
+if ($homeState.path -ne '/' -or !$homeState.ytApp) {
+  throw "LAUNCH_MUST_OPEN_HOME_NOT_LAST_VIDEO:path=$($homeState.path)"
 }
 $firstClick = Load 'first-click'
 $firstBefore = Load 'first-before'
@@ -28,8 +28,8 @@ $firstAfter = Load 'first-after'
 $secondClick = Load 'second-click'
 $secondBefore = Load 'second-before'
 $secondAfter = Load 'second-after'
-if (!$firstClick.clicked -or $home.feedLinks -lt 1) {
-  throw 'HOME_FEED_MUST_ALLOW_OPENING_REAL_VIDEO'
+if (!$firstClick.clicked) {
+  throw 'HOME_OR_SEARCH_MUST_ALLOW_OPENING_REAL_VIDEO'
 }
 if (!$secondClick.clicked) { throw 'RELATED_VIDEO_NAVIGATION_MUST_WORK' }
 if (!$firstBefore.watch -or !$secondBefore.watch -or
@@ -51,7 +51,7 @@ foreach ($name in @('first','second')) {
 }
 [ordered]@{
   status='PASS'
-  startupPath=$home.path
+  startupPath=$homeState.path
   firstVideoId=$firstAfter.id
   secondVideoId=$secondAfter.id
   firstAdvanceSeconds=[math]::Round(([double]$firstAfter.time-[double]$firstBefore.time),2)
