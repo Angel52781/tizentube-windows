@@ -43,6 +43,7 @@ namespace TizenTubeWindows
         public bool PreferencesSetupProbe { get; set; } = false;
         public bool PreferencesRestartProbe { get; set; } = false;
         public bool NavigationBackProbe { get; set; } = false;
+        public bool KeyboardShortcutsProbe { get; set; } = false;
 
         public static HostOptions Parse(string[] args)
         {
@@ -134,6 +135,7 @@ namespace TizenTubeWindows
                 else if (arg == "--preferences-setup-probe") options.PreferencesSetupProbe = true;
                 else if (arg == "--preferences-restart-probe") options.PreferencesRestartProbe = true;
                 else if (arg == "--navigation-back-probe") options.NavigationBackProbe = true;
+                else if (arg == "--keyboard-shortcuts-probe") options.KeyboardShortcutsProbe = true;
                 else if (arg == "--help" || arg == "-h")
                 {
                     options.ShowHelp = true;
@@ -239,6 +241,7 @@ namespace TizenTubeWindows
         private bool floatingVisualProbeStarted = false;
         private bool theaterProbeStarted = false;
         private bool preferencesProbeStarted = false;
+        private bool keyboardProbeStarted = false;
         private long blockedAdCount = 0;
         private long trimCount = 0;
         private long modsInitializedCount = 0;
@@ -483,6 +486,16 @@ namespace TizenTubeWindows
                         if (!nav.IsSuccess || preferencesProbeStarted || IsDisposed) return;
                         preferencesProbeStarted = true;
                         await CapturePreferencesAndNavigationProbeAsync();
+                    };
+                }
+
+                if (options.KeyboardShortcutsProbe)
+                {
+                    webView.CoreWebView2.NavigationCompleted += async (sender, nav) =>
+                    {
+                        if (!nav.IsSuccess || keyboardProbeStarted || IsDisposed) return;
+                        keyboardProbeStarted = true;
+                        await CaptureKeyboardShortcutsProbeAsync();
                     };
                 }
 
@@ -862,6 +875,61 @@ namespace TizenTubeWindows
                 }
             }
             finally { ResumeLayout(); }
+        }
+
+        private async Task CaptureKeyboardShortcutsProbeAsync()
+        {
+            // CI-only synthetic guest profile; export numerical media state only.
+            // SendKeys drives *real* Windows keyboard input into WebView2.
+            try
+            {
+                await Task.Delay(15000); // Allow YouTube's real player to load.
+                if (IsDisposed || webView?.CoreWebView2 == null) return;
+                string folder = Path.GetDirectoryName(options.TelemetryFilePath ?? "");
+                if (string.IsNullOrEmpty(folder)) folder = appDataDir;
+                Directory.CreateDirectory(folder);
+
+                string setup = "(() => {const v=document.querySelector('video.html5-main-video');" +
+                    "if(!v||v.readyState<2||!Number.isFinite(v.duration)||v.duration<90)return null;" +
+                    "v.pause();v.currentTime=60;return {ready:true};})()";
+                File.WriteAllText(Path.Combine(folder, "keyboard-setup.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(setup));
+                await Task.Delay(1200);
+
+                string snapshot = "(() => {const v=document.querySelector('video.html5-main-video');" +
+                    "return v?{time:v.currentTime,paused:v.paused,readyState:v.readyState}:null;})()";
+                File.WriteAllText(Path.Combine(folder, "keyboard-before.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(snapshot));
+                Activate();
+                webView.Focus();
+
+                SendKeys.SendWait("{RIGHT}");
+                await Task.Delay(950);
+                File.WriteAllText(Path.Combine(folder, "keyboard-after-right.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(snapshot));
+
+                SendKeys.SendWait("{LEFT}");
+                await Task.Delay(950);
+                File.WriteAllText(Path.Combine(folder, "keyboard-after-left.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(snapshot));
+
+                // Ensure a paused baseline. The player could auto-resume on seek.
+                await webView.CoreWebView2.ExecuteScriptAsync(
+                    "document.querySelector('video.html5-main-video')?.pause()");
+                await Task.Delay(150);
+                File.WriteAllText(Path.Combine(folder, "keyboard-before-space.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(snapshot));
+                webView.Focus();
+                SendKeys.SendWait(" ");
+                await Task.Delay(1100);
+                File.WriteAllText(Path.Combine(folder, "keyboard-after-space.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(snapshot));
+                Console.WriteLine("[Host Keyboard] Windows key input probe saved");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("[Host Keyboard Probe] " + ex.Message);
+            }
         }
 
         private async Task CaptureFloatingVisualProbeAsync()
