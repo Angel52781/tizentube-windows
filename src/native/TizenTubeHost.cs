@@ -877,6 +877,18 @@ namespace TizenTubeWindows
                     "return {x:r.left+r.width/2,y:r.top+r.height/2,width:r.width,height:r.height}; })()";
                 string geometry = await webView.CoreWebView2.ExecuteScriptAsync(script);
                 File.WriteAllText(Path.Combine(folder, "theater-button-geometry.json"), geometry);
+                string viewingProbe = "(() => { const l=window.__TIZENTUBE_LOADER__; " +
+                    "const v=l?.viewing; return { path:location.pathname, " +
+                    "bundlePresent:!!l, viewingPresent:!!v, mounted:v?.mounted??null, " +
+                    "disposed:v?.disposed??null, videoIdPresent:!!v?.getVideoId?.(), " +
+                    "controlsPresent:!!document.querySelector('.ytp-right-controls'), " +
+                    "theaterButtonPresent:!!document.querySelector('.ytp-size-button'), " +
+                    "pipButtonPresent:!!document.querySelector('#tizentube-native-pip'), " +
+                    "theaterListenerPresent:!!v?.theaterButton, " +
+                    "storedPreference:v?.savedTheaterState?.()??null, " +
+                    "isNavigating:v?.isNavigating??null }; })()";
+                File.WriteAllText(Path.Combine(folder, "theater-viewing-before.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(viewingProbe));
                 if (options.TheaterUserProbe && geometry != "null")
                 {
                     using (var values = System.Text.Json.JsonDocument.Parse(geometry))
@@ -900,6 +912,8 @@ namespace TizenTubeWindows
                 }
                 string snapshot = await webView.CoreWebView2.ExecuteScriptAsync(
                     "window.__ttFloating?.diagnostics() || null");
+                File.WriteAllText(Path.Combine(folder, "theater-viewing-after.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(viewingProbe));
                 File.WriteAllText(Path.Combine(folder, options.TheaterUserProbe
                     ? "theater-after-click.json" : "theater-after-restart.json"), snapshot);
                 string persisted = File.Exists(theaterPreferenceFile)
