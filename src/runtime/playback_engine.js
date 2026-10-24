@@ -340,11 +340,8 @@ export class PlaybackEngine {
         target.msRequestFullscreen();
       }
     } catch (_) {}
-    if (document.fullscreenElement === null) {
-      document.fullscreenElement = target;
-    }
-    this.state.isFullscreen = true;
-    this.emit('fullscreenchange', { isFullscreen: true });
+    // Only fullscreenchange from the browser is authoritative. Never
+    // overwrite read-only document.fullscreenElement or send a duplicate IPC.
     return true;
   }
 
@@ -364,11 +361,6 @@ export class PlaybackEngine {
         document.msExitFullscreen();
       }
     } catch (_) {}
-    if (document.fullscreenElement) {
-      document.fullscreenElement = null;
-    }
-    this.state.isFullscreen = false;
-    this.emit('fullscreenchange', { isFullscreen: false });
     return true;
   }
 
@@ -565,6 +557,11 @@ export class PlaybackEngine {
       this.listeners.set(event, []);
     }
     this.listeners.get(event).push(handler);
+  }
+
+  off(event, handler) {
+    const handlers = this.listeners.get(event);
+    if (handlers) this.listeners.set(event, handlers.filter(h => h !== handler));
   }
 
   emit(event, data) {

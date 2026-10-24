@@ -8,7 +8,7 @@
     "bundle": "node scripts/bundle_mods.js",
     "build": "node scripts/bundle_mods.js && python3 scripts/build_x64.py",
     "verify": "python3 scripts/verify_pe.py dist/TizenTube-win-x64/TizenTube.exe && node scripts/test_host_integrity.js",
-    "test": "node scripts/bundle_mods.js && node scripts/test_runtime.js && node scripts/test_ui_features.js && node scripts/test_mods_fault_tolerance.js && node scripts/test_live_injection_lifecycle.js && node scripts/test_sponsored_feed.js && node scripts/test_original_tv_parity.js && node scripts/test_adblock_diagnostics.js && node scripts/test_bundle.js && node scripts/test_telemetry.js && python3 scripts/build_x64.py && node scripts/test_host_integrity.js",
+    "test": "node scripts/bundle_mods.js && node scripts/test_runtime.js && node scripts/test_ui_features.js && node scripts/test_mods_fault_tolerance.js && node scripts/test_live_injection_lifecycle.js && node scripts/test_viewing_experience.js && node scripts/test_sponsored_feed.js && node scripts/test_original_tv_parity.js && node scripts/test_adblock_diagnostics.js && node scripts/test_bundle.js && node scripts/test_telemetry.js && python3 scripts/build_x64.py && node scripts/test_host_integrity.js",
     "test:telemetry": "node scripts/test_telemetry.js",
     "clean": "rm -rf dist/ build/"
   },

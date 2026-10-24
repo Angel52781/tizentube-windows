@@ -643,6 +643,9 @@ async function runAll() {
 
     // Enter fullscreen
     playback.enterFullscreen();
+    assert.strictEqual(playback.state.isFullscreen, false, 'Request alone is not fullscreen confirmation');
+    document.fullscreenElement = mockBody;
+    document.dispatchEvent({ type: 'fullscreenchange' });
     assert.strictEqual(playback.state.isFullscreen, true);
     assert.strictEqual(fsEmitted, true);
 
@@ -651,6 +654,8 @@ async function runAll() {
 
     // Exit fullscreen
     playback.exitFullscreen();
+    document.fullscreenElement = null;
+    document.dispatchEvent({ type: 'fullscreenchange' });
     assert.strictEqual(playback.state.isFullscreen, false);
     assert.strictEqual(fsEmitted, false);
 
@@ -659,8 +664,12 @@ async function runAll() {
 
     // Toggle fullscreen
     playback.toggleFullscreen();
+    document.fullscreenElement = mockBody;
+    document.dispatchEvent({ type: 'fullscreenchange' });
     assert.strictEqual(playback.state.isFullscreen, true);
     playback.toggleFullscreen();
+    document.fullscreenElement = null;
+    document.dispatchEvent({ type: 'fullscreenchange' });
     assert.strictEqual(playback.state.isFullscreen, false);
   });
 

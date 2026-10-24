@@ -11,6 +11,7 @@ import { AdBlockBase } from './adblock_base.js';
 import { SponsorBlockBase } from './sponsorblock_base.js';
 import { DeArrowBase } from './dearrow_base.js';
 import { PlaybackEngine } from '../runtime/playback_engine.js';
+import { ViewingExperience } from '../runtime/viewing_experience.js';
 import { NavigationManager } from '../runtime/navigation.js';
 import { IpcBridge } from '../runtime/ipc_bridge.js';
 import { AppUI } from '../ui/app_ui.js';
@@ -23,6 +24,7 @@ export class ModLoader {
     this.sponsorblock = new SponsorBlockBase(config.features?.sponsorblock || {});
     this.dearrow = new DeArrowBase(config.features?.dearrow || {});
     this.playback = new PlaybackEngine(config.features?.playback || {});
+    this.viewing = new ViewingExperience(this.playback, config.features?.viewing || {});
     this.navigation = new NavigationManager();
 
     this.ui = new AppUI({
@@ -65,9 +67,11 @@ export class ModLoader {
     // 3. Mount UI if DOM is available
     if (typeof document !== 'undefined' && document.body) {
       this.ui.mount(document.body);
+      this.viewing.mount();
     } else if (typeof window !== 'undefined') {
       window.addEventListener('DOMContentLoaded', () => {
         this.ui.mount(document.body);
+        this.viewing.mount();
       });
     }
 
@@ -118,6 +122,7 @@ export class ModLoader {
    * Cleans up all mod listeners, timers, caches, and injected DOM elements.
    */
   dispose() {
+    if (this.viewing?.dispose) this.viewing.dispose();
     if (this.adblock?.dispose) this.adblock.dispose();
     if (this.sponsorblock?.dispose) this.sponsorblock.dispose();
     if (this.dearrow?.dispose) this.dearrow.dispose();

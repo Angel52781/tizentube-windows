@@ -33,6 +33,7 @@ namespace TizenTubeWindows
         public bool ShowHelp { get; set; } = false;
         public bool DiagnoseAdsOnStartup { get; set; } = false;
         public bool TvMode { get; set; } = false;
+        public bool WindowCycleTest { get; set; } = false;
 
         public static HostOptions Parse(string[] args)
         {
@@ -93,6 +94,10 @@ namespace TizenTubeWindows
                     // Opt-in and metadata-only; never capture auth/cookies.
                     options.DiagnoseAdsOnStartup = true;
                 }
+                else if (arg == "--window-cycle-test")
+                {
+                    options.WindowCycleTest = true;
+                }
                 else if (arg == "--help" || arg == "-h")
                 {
                     options.ShowHelp = true;
@@ -116,6 +121,7 @@ namespace TizenTubeWindows
             Console.WriteLine("  --headless            Launch hidden offscreen for CI/automated testing");
             Console.WriteLine("  --tv                  Experimental YouTube TV UI (Cobalt-like); separate profile");
             Console.WriteLine("  --diagnose-ads        Save a local, metadata-only ad structure report on first load");
+            Console.WriteLine("  --window-cycle-test   Test borderless fullscreen and native window restoration");
             Console.WriteLine("  --help, -h            Show this help message");
         }
     }
@@ -175,6 +181,16 @@ namespace TizenTubeWindows
         private long adblockStyleObserved = 0;
         private long adblockRuntimeObserved = 0;
         private bool initialAdDiagnosticQueued = false;
+        private bool manualImmersiveMode = false;
+        private bool webPlayerFullscreen = false;
+        private bool nativeImmersiveActive = false;
+        private Rectangle boundsBeforeFullscreen;
+        private FormWindowState stateBeforeFullscreen;
+        private FormBorderStyle borderBeforeFullscreen;
+        private bool topMostBeforeFullscreen;
+        private long windowCyclePass = 0;
+        private long windowFullMonitorPass = 0;
+        private long windowRestorePass = 0;
         private DateTime startTimeUtc = DateTime.UtcNow;
 
         public int ExitCode { get; private set; } = 0;
@@ -226,6 +242,29 @@ namespace TizenTubeWindows
             {
                 SetupSmokeTestTimer();
             }
+
+            if (this.options.WindowCycleTest && !this.options.HeadlessMode)
+            {
+                this.Shown += (sender, evt) => BeginInvoke((MethodInvoker)delegate {
+                    var beforeBounds = this.Bounds;
+                    var beforeState = this.WindowState;
+                    var beforeBorder = this.FormBorderStyle;
+                    manualImmersiveMode = true;
+                    UpdateNativeImmersiveMode();
+                    bool fullscreenCoversScreen = this.Bounds == Screen.FromControl(this).Bounds &&
+                        this.FormBorderStyle == FormBorderStyle.None && this.TopMost;
+                    manualImmersiveMode = false;
+                    UpdateNativeImmersiveMode();
+                    bool restored = this.Bounds == beforeBounds &&
+                        this.WindowState == beforeState && this.FormBorderStyle == beforeBorder &&
+                        !this.TopMost;
+                    if (fullscreenCoversScreen) Interlocked.Exchange(ref windowFullMonitorPass, 1);
+                    if (restored) Interlocked.Exchange(ref windowRestorePass, 1);
+                    if (fullscreenCoversScreen && restored) Interlocked.Exchange(ref windowCyclePass, 1);
+                    else this.ExitCode = 3;
+                    Console.WriteLine($"[Host Immersive Test] screen={fullscreenCoversScreen} restore={restored}");
+                });
+            }
         }
 
         private async void InitializeWebView()
@@ -246,8 +285,8 @@ namespace TizenTubeWindows
                     "--enable-features=VaapiVideoDecoder,PlatformHEVCDecoderSupport " +
                     "--disk-cache-size=104857600 " +
                     "--media-cache-size=104857600 " +
-                    "--disable-background-timer-throttling " +
-                    "--disable-renderer-backgrounding " +
+                    // Allow Chromium to throttle idle/background tabs: no
+                    // background video should force a renderer to busy-loop.
                     "--enable-gpu-rasterization " +
                     "--enable-zero-copy";
 
@@ -425,23 +464,56 @@ namespace TizenTubeWindows
 
         private void SetupFullscreenHandling()
         {
-            // Synchronize native window borderless fullscreen when web player enters/exits fullscreen
+            // Single native source of truth for web player fullscreen.
+            // Older builds also reacted to fullscreen:state IPC and reset
+            // WindowState twice, often restoring a minimized/small window.
             webView.CoreWebView2.ContainsFullScreenElementChanged += (s, args) =>
             {
-                this.Invoke((MethodInvoker)delegate
-                {
-                    if (webView.CoreWebView2.ContainsFullScreenElement)
-                    {
-                        this.FormBorderStyle = FormBorderStyle.None;
-                        this.WindowState = FormWindowState.Maximized;
-                    }
-                    else
-                    {
-                        this.FormBorderStyle = FormBorderStyle.Sizable;
-                        this.WindowState = FormWindowState.Normal;
-                    }
+                if (IsDisposed || !IsHandleCreated) return;
+                BeginInvoke((MethodInvoker)delegate {
+                    webPlayerFullscreen = webView.CoreWebView2.ContainsFullScreenElement;
+                    UpdateNativeImmersiveMode();
                 });
             };
+        }
+
+        private void UpdateNativeImmersiveMode()
+        {
+            if (options.HeadlessMode) return;
+            bool shouldBeFullscreen = manualImmersiveMode || webPlayerFullscreen;
+            if (shouldBeFullscreen == nativeImmersiveActive) return;
+            if (shouldBeFullscreen)
+            {
+                // A maximized borderless WinForms window may use *work area*
+                // bounds and leave the taskbar visible. Use full Screen.Bounds.
+                boundsBeforeFullscreen = this.WindowState == FormWindowState.Normal
+                    ? this.Bounds : this.RestoreBounds;
+                stateBeforeFullscreen = this.WindowState;
+                borderBeforeFullscreen = this.FormBorderStyle;
+                topMostBeforeFullscreen = this.TopMost;
+                nativeImmersiveActive = true;
+                this.SuspendLayout();
+                this.WindowState = FormWindowState.Normal;
+                this.FormBorderStyle = FormBorderStyle.None;
+                this.Bounds = Screen.FromControl(this).Bounds;
+                this.TopMost = true;
+                this.ResumeLayout();
+            }
+            else
+            {
+                nativeImmersiveActive = false;
+                this.SuspendLayout();
+                this.TopMost = topMostBeforeFullscreen;
+                this.FormBorderStyle = borderBeforeFullscreen;
+                this.WindowState = FormWindowState.Normal;
+                if (boundsBeforeFullscreen.Width > 0 && boundsBeforeFullscreen.Height > 0)
+                    this.Bounds = boundsBeforeFullscreen;
+                if (stateBeforeFullscreen == FormWindowState.Maximized)
+                    this.WindowState = FormWindowState.Maximized;
+                // Do not restore Minimized: a user exiting video fullscreen
+                // should always see a usable window.
+                this.ResumeLayout();
+            }
         }
 
         private void SetupIpcBridge()
@@ -516,22 +588,9 @@ namespace TizenTubeWindows
                     }
                     else if (json.Contains("fullscreen:state"))
                     {
-                        // Update window borderless fullscreen if requested from JS
-                        bool isFs = json.Contains("\"isFullscreen\":true");
-                        Console.WriteLine($"[Host IPC] Fullscreen state updated: isFullscreen={isFs}");
-                        this.Invoke((MethodInvoker)delegate
-                        {
-                            if (isFs)
-                            {
-                                this.FormBorderStyle = FormBorderStyle.None;
-                                this.WindowState = FormWindowState.Maximized;
-                            }
-                            else
-                            {
-                                this.FormBorderStyle = FormBorderStyle.Sizable;
-                                this.WindowState = FormWindowState.Normal;
-                            }
-                        });
+                        // Informational only. CoreWebView2.ContainsFullScreenElementChanged
+                        // controls the native window. Never process fullscreen
+                        // events twice (an out-of-order IPC caused restore bugs).
                     }
                     else if (json.Contains("telemetry:request"))
                     {
@@ -602,12 +661,14 @@ namespace TizenTubeWindows
 
         private void SetupMemoryTrimming()
         {
-            // Trims process working set periodically (every 30 seconds)
+            // Trims the host working set at most every 2 minutes *only while minimized*.
             // NOTE: EmptyWorkingSet unmaps physical RAM pages to the Windows paging file,
             // lowering Working Set metrics during idle or minimized states. Real private bytes
             // reduction is achieved via single-renderer process limits, cache limits, and mod cache flushes.
-            memoryTrimTimer = new System.Windows.Forms.Timer { Interval = 30000 };
-            memoryTrimTimer.Tick += (s, e) => TrimMemoryNow();
+            memoryTrimTimer = new System.Windows.Forms.Timer { Interval = 120000 };
+            memoryTrimTimer.Tick += (s, e) => {
+                if (WindowState == FormWindowState.Minimized) TrimMemoryNow();
+            };
             memoryTrimTimer.Start();
         }
 
@@ -624,18 +685,13 @@ namespace TizenTubeWindows
                 }
                 catch { }
 
-                // 2. Trim host process working set
-                EmptyWorkingSet(Process.GetCurrentProcess().Handle);
+                // EmptyWorkingSet during video playback causes refaults and
+                // stalls. Only trim the host's own memory while minimized.
+                if (WindowState == FormWindowState.Minimized)
+                    EmptyWorkingSet(Process.GetCurrentProcess().Handle);
 
-                // 3. Trim child WebView2 processes (browser, renderer, gpu)
-                foreach (var proc in Process.GetProcessesByName("msedgewebview2"))
-                {
-                    try
-                    {
-                        EmptyWorkingSet(proc.Handle);
-                    }
-                    catch { }
-                }
+                // Never trim every msedgewebview2.exe process on the machine:
+                // some belong to Edge, Teams, other apps or separate profiles.
             }
             catch { }
         }
@@ -714,6 +770,9 @@ namespace TizenTubeWindows
             sb.AppendLine($"    \"modsInitializedCount\": {Interlocked.Read(ref modsInitializedCount)},");
             sb.AppendLine($"    \"adblockRuntimeObserved\": {Interlocked.Read(ref adblockRuntimeObserved)},");
             sb.AppendLine($"    \"adblockStyleObserved\": {Interlocked.Read(ref adblockStyleObserved)},");
+            sb.AppendLine($"    \"windowCyclePass\": {Interlocked.Read(ref windowCyclePass)},");
+            sb.AppendLine($"    \"windowFullMonitorPass\": {Interlocked.Read(ref windowFullMonitorPass)},");
+            sb.AppendLine($"    \"windowRestorePass\": {Interlocked.Read(ref windowRestorePass)},");
             sb.AppendLine($"    \"sponsorBlockSkipCount\": {Interlocked.Read(ref sponsorBlockSkipCount)}");
             sb.AppendLine("  },");
             sb.AppendLine("  \"processes\": [");
@@ -774,16 +833,16 @@ namespace TizenTubeWindows
 
         private void ToggleFullscreen()
         {
-            if (this.FormBorderStyle == FormBorderStyle.None)
+            // F11 can hide the native frame even on the home feed.
+            // If the web player is fullscreen, F11 exits that player first.
+            if (webPlayerFullscreen)
             {
-                this.FormBorderStyle = FormBorderStyle.Sizable;
-                this.WindowState = FormWindowState.Normal;
+                _ = webView.CoreWebView2.ExecuteScriptAsync(
+                    "if(document.fullscreenElement) document.exitFullscreen();");
+                return;
             }
-            else
-            {
-                this.FormBorderStyle = FormBorderStyle.None;
-                this.WindowState = FormWindowState.Maximized;
-            }
+            manualImmersiveMode = !manualImmersiveMode;
+            UpdateNativeImmersiveMode();
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
