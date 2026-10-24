@@ -153,7 +153,7 @@ async function runTests() {
     assert.strictEqual(mockResponse.adPlacements, undefined, 'adPlacements must be deleted');
     assert.strictEqual(mockResponse.playerAds, undefined, 'playerAds must be deleted');
     assert.strictEqual(mockResponse.adSlots, undefined, 'adSlots must be deleted');
-    assert.strictEqual(mockResponse.playerResponse.adPlacements, undefined, 'nested adPlacements must be deleted');
+    assert.ok(Array.isArray(mockResponse.playerResponse.adPlacements), 'desktop player ad fields are preserved to protect playback');
     assert.strictEqual(mockResponse.contents.videoId, 'abc123xyz', 'Legitimate content must be preserved');
     assert(adblock.blockedCount >= 4, 'Must count blocked elements');
   });
