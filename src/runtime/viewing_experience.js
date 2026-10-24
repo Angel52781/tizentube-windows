@@ -5,7 +5,8 @@
 export class ViewingExperience {
   constructor(playback, options = {}) {
     this.playback = playback;
-    this.options = { restoreOnLaunch: true, ...options };
+    // Never force the last watched video at application start. Resume is opt-in.
+    this.options = { restoreOnLaunch: false, ...options };
     this.theaterKey = 'tizentube.theater.v1';
     this.lastKey = 'tizentube.lastVideo.v1';
     this.lastSavedAt = 0;
