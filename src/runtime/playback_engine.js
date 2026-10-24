@@ -391,118 +391,111 @@ export class PlaybackEngine {
     if (this._onKeyDown) return;
 
     this._onKeyDown = (e) => {
-      // Avoid intercepting keystrokes inside search input or comments
-      const tag = e.target.tagName ? e.target.tagName.toLowerCase() : '';
-      if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) {
+      // Do not steal browser/system combinations, text entry, or the focused
+      // buttons and sliders. Keyboard controls belong to video playback only.
+      const target = e.target;
+      const tag = target?.tagName?.toLowerCase?.() || '';
+      if (e.isComposing || e.ctrlKey || e.altKey || e.metaKey ||
+          target?.isContentEditable ||
+          ['input', 'textarea', 'select', 'button', 'a'].includes(tag) ||
+          target?.closest?.('[contenteditable], [role="textbox"], [role="button"], [role="slider"], [role="menuitem"]')) {
         return;
       }
 
-      // Percent jumps (0-9)
-      if (e.key >= '0' && e.key <= '9') {
+      // YouTube also handles these keys. Capture *before* its document/player
+      // handlers; preventDefault alone at window bubble phase is too late
+      // and causes a 5s seek followed by another 5s seek (visible as 10s).
+      const claim = () => {
         e.preventDefault();
-        const percent = parseInt(e.key, 10) * 10;
+        e.stopImmediatePropagation?.();
+      };
+      const key = e.code === 'Space' ? ' ' : e.key;
+
+      // Native YouTube owns C (captions), T (theater) and I (miniplayer).
+      // ViewingExperience observes the *trusted* T key to persist theater
+      // choice. Consuming these at window capture would break that contract.
+      if (typeof key === 'string' && ['c', 't', 'i'].includes(key.toLowerCase())) return;
+
+      // Percent jumps (0-9)
+      if (key >= '0' && key <= '9') {
+        claim();
+        const percent = parseInt(key, 10) * 10;
         const target = (this.state.duration || 0) * (percent / 100);
         this.seekTo(target);
         return;
       }
 
-      switch (e.key) {
+      switch (key) {
         case ' ':
+        case 'Spacebar':
         case 'k':
         case 'K':
-          e.preventDefault();
-          this.togglePlay();
+          claim();
+          if (!e.repeat) this.togglePlay();
           break;
         case 'j':
         case 'J':
-          e.preventDefault();
+          claim();
           this.seekBy(-10);
           break;
         case 'l':
         case 'L':
-          e.preventDefault();
+          claim();
           this.seekBy(10);
           break;
         case 'ArrowLeft':
-          e.preventDefault();
+          claim();
           this.seekBy(-5);
           break;
         case 'ArrowRight':
-          e.preventDefault();
+          claim();
           this.seekBy(5);
           break;
         case 'Home':
-          e.preventDefault();
+          claim();
           this.seekTo(0);
           break;
         case 'End':
-          e.preventDefault();
+          claim();
           this.seekTo(this.state.duration || 0);
           break;
         case 'ArrowUp':
-          e.preventDefault();
+          claim();
           this.adjustVolume(5);
           break;
         case 'ArrowDown':
-          e.preventDefault();
+          claim();
           this.adjustVolume(-5);
           break;
         case 'm':
         case 'M':
-          e.preventDefault();
+          claim();
           this.toggleMute();
           break;
         case 'f':
         case 'F':
         case 'F11':
-          e.preventDefault();
+          claim();
           this.toggleFullscreen();
           break;
         case '>':
         case '.':
           if (e.shiftKey || e.key === '>') {
-            e.preventDefault();
+            claim();
             this.setPlaybackRate(this.state.playbackRate + 0.25);
           }
           break;
         case '<':
         case ',':
           if (e.shiftKey || e.key === '<') {
-            e.preventDefault();
+            claim();
             this.setPlaybackRate(this.state.playbackRate - 0.25);
           }
-          break;
-        case 'c':
-        case 'C':
-          e.preventDefault();
-          if (typeof document !== 'undefined') {
-            const ccBtn = document.querySelector('.ytp-subtitles-button');
-            if (ccBtn) ccBtn.click();
-          }
-          this.emit('toggleCaptions');
-          break;
-        case 't':
-        case 'T':
-          e.preventDefault();
-          if (typeof document !== 'undefined') {
-            const theaterBtn = document.querySelector('.ytp-size-button');
-            if (theaterBtn) theaterBtn.click();
-          }
-          this.emit('toggleTheater');
-          break;
-        case 'i':
-        case 'I':
-          e.preventDefault();
-          if (typeof document !== 'undefined') {
-            const miniBtn = document.querySelector('.ytp-miniplayer-button');
-            if (miniBtn) miniBtn.click();
-          }
-          this.emit('toggleMiniplayer');
           break;
       }
     };
 
-    window.addEventListener('keydown', this._onKeyDown);
+    window.addEventListener('keydown', this._onKeyDown, true);
   }
 
   /**
@@ -589,7 +582,7 @@ export class PlaybackEngine {
       this.videoObserver = null;
     }
     if (typeof window !== 'undefined' && this._onKeyDown) {
-      window.removeEventListener('keydown', this._onKeyDown);
+      window.removeEventListener('keydown', this._onKeyDown, true);
       this._onKeyDown = null;
     }
     if (typeof document !== 'undefined' && this._onFsChange) {

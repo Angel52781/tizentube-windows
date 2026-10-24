@@ -11,6 +11,9 @@ on:
       - 'scripts/**'
       - '.github/workflows/windows-experience-e2e.yml'
       - 'package.json'
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -41,6 +44,7 @@ jobs:
           node scripts/bundle_mods.js
           node scripts/test_runtime.js
           node scripts/test_ui_features.js
+          node scripts/test_keyboard_shortcuts.js
           node scripts/test_hidpi_comments_ux.js
           node scripts/test_mods_fault_tolerance.js
           node scripts/test_live_injection_lifecycle.js
@@ -63,6 +67,11 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or !(Test-Path windows-experience-host/TizenTubeHost.exe)) {
             throw 'WINDOWS_EXE_BUILD_FAILED'
           }
+      - name: Press real Windows Arrow keys and Space inside WebView2
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File ./scripts/ci_windows_keyboard.ps1 -Executable windows-experience-host/TizenTubeHost.exe -EvidenceDirectory windows-experience-evidence
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_KEYBOARD_E2E_FAILED' }
       - name: Play YouTube and verify visible PiP, native controls, persisted cinema
         shell: pwsh
         run: |

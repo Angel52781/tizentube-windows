@@ -42,6 +42,7 @@ jobs:
         shell: pwsh
         run: |
           npm test
+          node scripts/test_keyboard_shortcuts.js
 
       - name: Generate Windows application icon
         shell: pwsh
