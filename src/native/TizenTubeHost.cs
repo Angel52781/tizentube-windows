@@ -741,7 +741,6 @@ namespace TizenTubeWindows
                     : appDataDir;
                 var env = await CoreWebView2Environment.CreateAsync(null, browserProfile, envOptions);
                 await webView.EnsureCoreWebView2Async(env);
-                try { webView.CoreWebView2.DefaultBackgroundColor = Color.FromArgb(255, 15, 15, 15); } catch { }
                 webView.CoreWebView2.HistoryChanged += (sender, eventArgs) => UpdateNavigationToolbar();
                 webView.CoreWebView2.SourceChanged += (sender, eventArgs) => UpdateNavigationToolbar();
                 webView.CoreWebView2.DocumentTitleChanged += (sender, eventArgs) => UpdateNavigationToolbar();
