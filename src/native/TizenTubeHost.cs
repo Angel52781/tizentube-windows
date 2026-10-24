@@ -934,6 +934,7 @@ namespace TizenTubeWindows
                 (DateTime.UtcNow - lastTheaterRestoreAttemptUtc).TotalMilliseconds < 2600) return;
             lastTheaterRestoreAttemptUtc = DateTime.UtcNow;
             theaterRestoreInProgress = true;
+            bool suppressionSet = false;
             try
             {
                 string state = await webView.CoreWebView2.ExecuteScriptAsync(
@@ -958,15 +959,33 @@ namespace TizenTubeWindows
                         type = "mousePressed", x, y, button = "left", clickCount = 1 });
                     string release = System.Text.Json.JsonSerializer.Serialize(new {
                         type = "mouseReleased", x, y, button = "left", clickCount = 1 });
+                    // CDP mouse input is a trusted DOM click. Mark this one
+                    // as an AUTOMATIC restore before dispatching, otherwise
+                    // ViewingExperience mistakes it for a new user choice and
+                    // may overwrite the persisted preference with false as
+                    // YouTube hydrates asynchronously (verified on PC).
+                    await webView.CoreWebView2.ExecuteScriptAsync(
+                        "window.__TT_RESTORING_THEATER = true");
+                    suppressionSet = true;
                     await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
                         "Input.dispatchMouseEvent", press);
                     await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
                         "Input.dispatchMouseEvent", release);
+                    await Task.Delay(520);
                     Interlocked.Increment(ref nativeTheaterRestored);
                 }
             }
             catch (Exception ex) { Debug.WriteLine("[Host Theater Restore] " + ex.Message); }
-            finally { theaterRestoreInProgress = false; }
+            finally
+            {
+                if (suppressionSet && webView?.CoreWebView2 != null)
+                {
+                    try { await webView.CoreWebView2.ExecuteScriptAsync(
+                        "window.__TT_RESTORING_THEATER = false"); }
+                    catch { /* A navigation destroys the old document anyway. */ }
+                }
+                theaterRestoreInProgress = false;
+            }
         }
 
         private async Task ToggleFloatingWindowAsync(bool restore = false)

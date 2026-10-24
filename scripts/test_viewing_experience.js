@@ -143,6 +143,14 @@ try {
     'Native host receives trusted theater restore instruction');
   check(hostMessages.at(-1).enabled, true, 'Restore uses saved user preference');
   check(theaterClicks, syntheticClicksBefore, 'Do not invoke ignored synthetic button click');
+  // Automatic CDP input is isTrusted=true; it must never rewrite the owner's
+  // saved theater preference as YouTube momentarily rehydrates the layout.
+  globalThis.window.__TT_RESTORING_THEATER = true;
+  ui._boundTheaterClick({ isTrusted: true });
+  await new Promise(resolve => setTimeout(resolve, 230));
+  check(local.get(ui.theaterKey), 'true',
+    'Trusted native restoration does not overwrite the actual user preference');
+  globalThis.window.__TT_RESTORING_THEATER = false;
 
   ui.mount();
   check(events.has('pagehide'), true, 'Crash/close resume checkpoint on pagehide');

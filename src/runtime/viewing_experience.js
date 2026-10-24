@@ -17,7 +17,8 @@ export class ViewingExperience {
     this._boundTheaterClick = e => {
       // YouTube can dispatch synthetic size-button clicks on navigation.
       // Only a trusted USER click changes the durable preference.
-      if (this.saveTheaterSuppressed || e?.isTrusted !== true) return;
+      if (this.saveTheaterSuppressed || window.__TT_RESTORING_THEATER ||
+          e?.isTrusted !== true) return;
       this.theaterUserChoicePending = true;
       setTimeout(() => {
         if (!this.disposed && this.getVideoId() && this.theaterElement) {
@@ -44,6 +45,7 @@ export class ViewingExperience {
     this.pipWatchdog = null;
     this.theaterRestoreUntil = 0;
     this.lastNativeTheaterRestoreAt = 0;
+    this.nativeTheaterRestoreAttempts = 0;
     this.pipButton = null;
     // The native WebView2 controller handles floating shortcuts: Chromium
     // consumes Ctrl+Shift+P for Print before a document keydown can cancel it.
@@ -200,8 +202,10 @@ export class ViewingExperience {
       // trusted input protocol, after verifying that the state still differs.
       if (typeof window !== 'undefined' && window.chrome?.webview?.postMessage) {
         const now = Date.now();
-        if (now - this.lastNativeTheaterRestoreAt > 3000) {
+        if (this.nativeTheaterRestoreAttempts < 5 &&
+            now - this.lastNativeTheaterRestoreAt > 3000) {
           this.lastNativeTheaterRestoreAt = now;
+          this.nativeTheaterRestoreAttempts++;
           window.chrome.webview.postMessage({ channel: 'viewing:restore-theater', enabled: saved });
         }
       } else {
@@ -321,6 +325,7 @@ export class ViewingExperience {
       return;
     }
     this.theaterRestoreUntil = Date.now() + 35000;
+    this.nativeTheaterRestoreAttempts = 0;
     // On SPA transitions, the player/controls arrive after yt-navigate-finish.
     if (this.retryTimer) clearTimeout(this.retryTimer);
     let attempts = 0;
