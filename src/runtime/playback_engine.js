@@ -411,6 +411,11 @@ export class PlaybackEngine {
       };
       const key = e.code === 'Space' ? ' ' : e.key;
 
+      // Native YouTube owns C (captions), T (theater) and I (miniplayer).
+      // ViewingExperience observes the *trusted* T key to persist theater
+      // choice. Consuming these at window capture would break that contract.
+      if (typeof key === 'string' && ['c', 't', 'i'].includes(key.toLowerCase())) return;
+
       // Percent jumps (0-9)
       if (key >= '0' && key <= '9') {
         claim();
@@ -486,33 +491,6 @@ export class PlaybackEngine {
             claim();
             this.setPlaybackRate(this.state.playbackRate - 0.25);
           }
-          break;
-        case 'c':
-        case 'C':
-          claim();
-          if (typeof document !== 'undefined') {
-            const ccBtn = document.querySelector('.ytp-subtitles-button');
-            if (ccBtn) ccBtn.click();
-          }
-          this.emit('toggleCaptions');
-          break;
-        case 't':
-        case 'T':
-          claim();
-          if (typeof document !== 'undefined') {
-            const theaterBtn = document.querySelector('.ytp-size-button');
-            if (theaterBtn) theaterBtn.click();
-          }
-          this.emit('toggleTheater');
-          break;
-        case 'i':
-        case 'I':
-          claim();
-          if (typeof document !== 'undefined') {
-            const miniBtn = document.querySelector('.ytp-miniplayer-button');
-            if (miniBtn) miniBtn.click();
-          }
-          this.emit('toggleMiniplayer');
           break;
       }
     };
