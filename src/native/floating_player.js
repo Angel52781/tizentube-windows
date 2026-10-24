@@ -48,13 +48,25 @@ html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-chrome-bottom
   const diagnostics = () => {
     const video = document.querySelector('video.html5-main-video');
     const rect = video?.getBoundingClientRect();
+    const controls = document.querySelector('.ytp-right-controls');
+    const captions = controls?.querySelector('.ytp-subtitles-button');
+    const pip = controls?.querySelector('#tizentube-native-pip');
+    const settings = controls?.querySelector('.ytp-settings-button');
+    const theater = document.querySelector('ytd-watch-flexy');
     return { active: !!state, videoReadyState: video?.readyState ?? -1,
       videoWidth: video?.videoWidth || 0, videoHeight: video?.videoHeight || 0,
       currentTime: Math.round(video?.currentTime || 0), paused: video?.paused ?? true,
       videoRect: rect ? { x: Math.round(rect.x), y: Math.round(rect.y),
         width: Math.round(rect.width), height: Math.round(rect.height) } : null,
       viewport: { width: window.innerWidth, height: window.innerHeight },
-      playerInBody: document.querySelector('#movie_player')?.parentElement === document.body };
+      playerInBody: document.querySelector('#movie_player')?.parentElement === document.body,
+      theater: theater ? theater.hasAttribute('theater') : null,
+      theaterPreference: typeof window.__TT_THEATER_PREF === 'boolean'
+        ? window.__TT_THEATER_PREF : null,
+      pipButtonVisible: !!pip && pip.getBoundingClientRect().width > 0,
+      pipButtonBetweenCaptionsAndSettings: !!captions && !!pip && !!settings &&
+        !!(captions.compareDocumentPosition(pip) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+        !!(pip.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING) };
   };
   const start = () => {
     if (state) return true;

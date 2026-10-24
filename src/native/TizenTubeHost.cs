@@ -38,6 +38,8 @@ namespace TizenTubeWindows
         public bool WindowPlacementTest { get; set; } = false;
         public bool FloatingHotKeyTest { get; set; } = false;
         public bool FloatingVisualProbe { get; set; } = false;
+        public bool TheaterUserProbe { get; set; } = false;
+        public bool TheaterRestoreProbe { get; set; } = false;
 
         public static HostOptions Parse(string[] args)
         {
@@ -117,6 +119,14 @@ namespace TizenTubeWindows
                 else if (arg == "--floating-visual-probe")
                 {
                     options.FloatingVisualProbe = true;
+                }
+                else if (arg == "--theater-user-probe")
+                {
+                    options.TheaterUserProbe = true;
+                }
+                else if (arg == "--theater-restore-probe")
+                {
+                    options.TheaterRestoreProbe = true;
                 }
                 else if (arg == "--help" || arg == "-h")
                 {
@@ -208,6 +218,7 @@ namespace TizenTubeWindows
         private string appDataDir;
         private string theaterPreferenceFile;
         private bool floatingVisualProbeStarted = false;
+        private bool theaterProbeStarted = false;
         private long blockedAdCount = 0;
         private long trimCount = 0;
         private long modsInitializedCount = 0;
@@ -431,6 +442,15 @@ namespace TizenTubeWindows
                         if (!nav.IsSuccess || floatingVisualProbeStarted || IsDisposed) return;
                         floatingVisualProbeStarted = true;
                         await CaptureFloatingVisualProbeAsync();
+                    };
+                }
+                if (options.TheaterUserProbe || options.TheaterRestoreProbe)
+                {
+                    webView.CoreWebView2.NavigationCompleted += async (sender, nav) =>
+                    {
+                        if (!nav.IsSuccess || theaterProbeStarted || IsDisposed) return;
+                        theaterProbeStarted = true;
+                        await CaptureTheaterProbeAsync();
                     };
                 }
 
@@ -839,6 +859,55 @@ namespace TizenTubeWindows
                 await ToggleFloatingWindowAsync(true);
             }
             catch (Exception ex) { Console.Error.WriteLine("[Host PiP Probe] " + ex.Message); }
+        }
+
+        private async Task CaptureTheaterProbeAsync()
+        {
+            // Local-only functional test: real WebView2 CDP mouse click,
+            // rather than element.click() (which has isTrusted=false).
+            try
+            {
+                await Task.Delay(11000);
+                if (IsDisposed || webView?.CoreWebView2 == null) return;
+                string folder = Path.GetDirectoryName(options.TelemetryFilePath ?? "");
+                if (string.IsNullOrEmpty(folder)) folder = appDataDir;
+                Directory.CreateDirectory(folder);
+                string script = "(() => { const b = document.querySelector('.ytp-size-button'); " +
+                    "if (!b) return null; const r=b.getBoundingClientRect(); " +
+                    "return {x:r.left+r.width/2,y:r.top+r.height/2,width:r.width,height:r.height}; })()";
+                string geometry = await webView.CoreWebView2.ExecuteScriptAsync(script);
+                File.WriteAllText(Path.Combine(folder, "theater-button-geometry.json"), geometry);
+                if (options.TheaterUserProbe && geometry != "null")
+                {
+                    using (var values = System.Text.Json.JsonDocument.Parse(geometry))
+                    {
+                        double x = values.RootElement.GetProperty("x").GetDouble();
+                        double y = values.RootElement.GetProperty("y").GetDouble();
+                        if (x > 0 && y > 0 &&
+                            values.RootElement.GetProperty("width").GetDouble() > 5)
+                        {
+                            string press = System.Text.Json.JsonSerializer.Serialize(new {
+                                type = "mousePressed", x, y, button = "left", clickCount = 1 });
+                            string release = System.Text.Json.JsonSerializer.Serialize(new {
+                                type = "mouseReleased", x, y, button = "left", clickCount = 1 });
+                            await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                                "Input.dispatchMouseEvent", press);
+                            await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                                "Input.dispatchMouseEvent", release);
+                            await Task.Delay(900);
+                        }
+                    }
+                }
+                string snapshot = await webView.CoreWebView2.ExecuteScriptAsync(
+                    "window.__ttFloating?.diagnostics() || null");
+                File.WriteAllText(Path.Combine(folder, options.TheaterUserProbe
+                    ? "theater-after-click.json" : "theater-after-restart.json"), snapshot);
+                string persisted = File.Exists(theaterPreferenceFile)
+                    ? File.ReadAllText(theaterPreferenceFile) : "NOT_SAVED";
+                File.WriteAllText(Path.Combine(folder, "theater-native-preference.txt"), persisted);
+                Console.WriteLine("[Host Theater] Local DOM and preference probe saved");
+            }
+            catch (Exception ex) { Console.Error.WriteLine("[Host Theater Probe] " + ex.Message); }
         }
 
         private async Task ToggleFloatingWindowAsync(bool restore = false)

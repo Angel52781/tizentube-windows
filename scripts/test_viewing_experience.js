@@ -25,11 +25,19 @@ const theaterButton = {
   click() { flexy.theater = !flexy.theater; theaterClicks++; theaterHandlers.get('click')?.(); }
 };
 const settingsButton = { id: 'settings' };
-const rightControls = { children: [], insertBefore(child, next) {
+const captionsButton = { id: 'captions' };
+const rightControls = { children: [captionsButton, settingsButton], insertBefore(child, next) {
   this.children = this.children.filter(item => item !== child);
-  child.parentNode = this; child.nextSibling = next;
-  this.children.push(child); domElements.set(child.id, child);
-}, querySelector() { return settingsButton; } };
+  const index = this.children.indexOf(next);
+  this.children.splice(index >= 0 ? index : this.children.length, 0, child);
+  child.parentNode = this;
+  this.children.forEach((item,i) => { item.nextSibling = this.children[i+1] || null; });
+  domElements.set(child.id, child);
+}, querySelector(selector) {
+  if (selector === '.ytp-settings-button') return settingsButton;
+  if (selector === '.ytp-subtitles-button') return captionsButton;
+  return null;
+} };
 const domElements = new Map();
 const video = { currentTime: 123, duration: 1800, addEventListener() {}, requestPictureInPicture: player.requestPictureInPicture };
 const playback = { videoElement: video, listeners: new Map(), on(e, f) { this.listeners.set(e,f); },
@@ -96,14 +104,18 @@ try {
   ui.syncTheaterMode();
   check(theaterClicks, 1, 'Idempotent restored mode');
   check(ui.mountPipControl(), true, 'PiP added alongside YouTube native controls');
-  check(rightControls.children.length, 1, 'No duplicate PiP button');
-  const button = rightControls.children[0];
+  check(rightControls.children.length, 3, 'PiP adds exactly one button');
+  check(rightControls.children[0] === captionsButton &&
+    rightControls.children[1].id === 'tizentube-native-pip' &&
+    rightControls.children[2] === settingsButton, true,
+    'Requested exact placement is captions → floating → settings');
+  const button = rightControls.children[1];
   const click = button.handlers.get('click');
   click({ stopPropagation() {} });
   check(nativePipRequests, 1, 'Click invokes HTMLVideoElement.requestPictureInPicture');
   check(button.title, 'Reproductor flotante (F9)', 'User can identify the shortcut');
   check(ui.mountPipControl(), true, 'Existing PiP control reused');
-  check(rightControls.children.length, 1, 'Repeated mounting does not duplicate floating buttons');
+  check(rightControls.children.length, 3, 'Repeated mounting does not duplicate floating buttons');
 
   // WebView2 disables document.pictureInPictureEnabled on some builds. The
   // floating button MUST remain visible and use the native host fallback.
