@@ -53,6 +53,7 @@ html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-chrome-bottom
     const pip = controls?.querySelector('#tizentube-native-pip');
     const settings = controls?.querySelector('.ytp-settings-button');
     const theater = document.querySelector('ytd-watch-flexy');
+    const left = element => element ? Math.round(element.getBoundingClientRect().left) : null;
     return { active: !!state, videoReadyState: video?.readyState ?? -1,
       videoWidth: video?.videoWidth || 0, videoHeight: video?.videoHeight || 0,
       currentTime: Math.round(video?.currentTime || 0), paused: video?.paused ?? true,
@@ -64,6 +65,8 @@ html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-chrome-bottom
       theaterPreference: typeof window.__TT_THEATER_PREF === 'boolean'
         ? window.__TT_THEATER_PREF : null,
       pipButtonVisible: !!pip && pip.getBoundingClientRect().width > 0,
+      captionsButtonPresent: !!captions, settingsButtonPresent: !!settings,
+      controlX: { captions: left(captions), pip: left(pip), settings: left(settings) },
       pipButtonBetweenCaptionsAndSettings: !!captions && !!pip && !!settings &&
         !!(captions.compareDocumentPosition(pip) & Node.DOCUMENT_POSITION_FOLLOWING) &&
         !!(pip.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING) };

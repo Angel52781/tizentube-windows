@@ -132,6 +132,18 @@ try {
   click({ stopPropagation() {} });
   check(hostMessages.length, 2, 'Button click toggles floating mode even with browser PiP disabled');
 
+  // Native WebView2 restores saved theater via trusted browser input because
+  // YouTube can ignore HTMLElement.click() when it is untrusted.
+  flexy.theater = false;
+  ui.setTheaterPreference(true);
+  ui.isNavigating = false;
+  const syntheticClicksBefore = theaterClicks;
+  ui.syncTheaterMode();
+  check(hostMessages.at(-1).channel, 'viewing:restore-theater',
+    'Native host receives trusted theater restore instruction');
+  check(hostMessages.at(-1).enabled, true, 'Restore uses saved user preference');
+  check(theaterClicks, syntheticClicksBefore, 'Do not invoke ignored synthetic button click');
+
   ui.mount();
   check(events.has('pagehide'), true, 'Crash/close resume checkpoint on pagehide');
   check(events.has('keydown'), false, 'Browser-level print accelerator is not intercepted in page JS');

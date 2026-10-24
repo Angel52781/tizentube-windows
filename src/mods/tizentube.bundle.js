@@ -802,6 +802,7 @@ class ViewingExperience {
     this.pipScanScheduled = false;
     this.pipWatchdog = null;
     this.theaterRestoreUntil = 0;
+    this.lastNativeTheaterRestoreAt = 0;
     this.pipButton = null;
     // The native WebView2 controller handles floating shortcuts: Chromium
     // consumes Ctrl+Shift+P for Print before a document keydown can cancel it.
@@ -953,10 +954,20 @@ class ViewingExperience {
     }
     const current = flexy.hasAttribute('theater');
     if (saved !== current && !this.theaterUserChoicePending) {
-      this.saveTheaterSuppressed = true;
-      try { theaterButton.click(); } finally {
-        // Attribute changes can arrive via the next mutation microtask.
-        queueMicrotask(() => { this.saveTheaterSuppressed = false; });
+      // YouTube sometimes ignores HTMLElement.click() (untrusted event). The
+      // host restores an actual user-visible theater button via WebView2's
+      // trusted input protocol, after verifying that the state still differs.
+      if (typeof window !== 'undefined' && window.chrome?.webview?.postMessage) {
+        const now = Date.now();
+        if (now - this.lastNativeTheaterRestoreAt > 3000) {
+          this.lastNativeTheaterRestoreAt = now;
+          window.chrome.webview.postMessage({ channel: 'viewing:restore-theater', enabled: saved });
+        }
+      } else {
+        this.saveTheaterSuppressed = true;
+        try { theaterButton.click(); } finally {
+          queueMicrotask(() => { this.saveTheaterSuppressed = false; });
+        }
       }
     }
     this.isNavigating = false;

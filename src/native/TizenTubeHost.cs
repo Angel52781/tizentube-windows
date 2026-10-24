@@ -217,6 +217,9 @@ namespace TizenTubeWindows
         private System.Windows.Forms.Timer smokeTestTimer;
         private string appDataDir;
         private string theaterPreferenceFile;
+        private bool theaterRestoreInProgress = false;
+        private DateTime lastTheaterRestoreAttemptUtc = DateTime.MinValue;
+        private long nativeTheaterRestored = 0;
         private bool floatingVisualProbeStarted = false;
         private bool theaterProbeStarted = false;
         private long blockedAdCount = 0;
@@ -924,6 +927,48 @@ namespace TizenTubeWindows
             catch (Exception ex) { Console.Error.WriteLine("[Host Theater Probe] " + ex.Message); }
         }
 
+        private async Task RestoreTheaterViaTrustedInputAsync(bool wanted)
+        {
+            if (webView?.CoreWebView2 == null || theaterRestoreInProgress ||
+                nativeFloatingActive || options.HeadlessMode ||
+                (DateTime.UtcNow - lastTheaterRestoreAttemptUtc).TotalMilliseconds < 2600) return;
+            lastTheaterRestoreAttemptUtc = DateTime.UtcNow;
+            theaterRestoreInProgress = true;
+            try
+            {
+                string state = await webView.CoreWebView2.ExecuteScriptAsync(
+                    "(() => { const b=document.querySelector('.ytp-size-button'); " +
+                    "const flexy=document.querySelector('ytd-watch-flexy'); " +
+                    "if (!b || !flexy || location.pathname !== '/watch') return null; " +
+                    "const r=b.getBoundingClientRect(); return {theater:flexy.hasAttribute('theater')," +
+                    "x:r.left+r.width/2,y:r.top+r.height/2,width:r.width,height:r.height}; })()");
+                if (state == "null") return;
+                using (var data = System.Text.Json.JsonDocument.Parse(state))
+                {
+                    var obj = data.RootElement;
+                    if (obj.GetProperty("theater").GetBoolean() == wanted) return;
+                    double x = obj.GetProperty("x").GetDouble();
+                    double y = obj.GetProperty("y").GetDouble();
+                    if (x < 0 || y < 0 || obj.GetProperty("width").GetDouble() < 5 ||
+                        obj.GetProperty("height").GetDouble() < 5 ||
+                        x >= webView.Width || y >= webView.Height) return;
+                    // Click the EXISTING YouTube size button rather than
+                    // changing CSS/attributes behind YouTube's state machine.
+                    string press = System.Text.Json.JsonSerializer.Serialize(new {
+                        type = "mousePressed", x, y, button = "left", clickCount = 1 });
+                    string release = System.Text.Json.JsonSerializer.Serialize(new {
+                        type = "mouseReleased", x, y, button = "left", clickCount = 1 });
+                    await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                        "Input.dispatchMouseEvent", press);
+                    await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                        "Input.dispatchMouseEvent", release);
+                    Interlocked.Increment(ref nativeTheaterRestored);
+                }
+            }
+            catch (Exception ex) { Debug.WriteLine("[Host Theater Restore] " + ex.Message); }
+            finally { theaterRestoreInProgress = false; }
+        }
+
         private async Task ToggleFloatingWindowAsync(bool restore = false)
         {
             if (webView?.CoreWebView2 == null || options.HeadlessMode) return;
@@ -993,6 +1038,24 @@ namespace TizenTubeWindows
                                     File.WriteAllText(tmp, value.GetBoolean() ? "true" : "false");
                                     File.Move(tmp, theaterPreferenceFile, true);
                                 }
+                            }
+                        }
+                        return;
+                    }
+
+                    if (json.Contains("\"channel\":\"viewing:restore-theater\""))
+                    {
+                        if (Uri.TryCreate(args.Source, UriKind.Absolute, out Uri sender) &&
+                            sender.Scheme == "https" &&
+                            (sender.Host == "www.youtube.com" || sender.Host == "youtube.com") &&
+                            json.Length < 500)
+                        {
+                            using (var parsed = System.Text.Json.JsonDocument.Parse(json))
+                            {
+                                if (parsed.RootElement.TryGetProperty("enabled", out var value) &&
+                                    (value.ValueKind == System.Text.Json.JsonValueKind.True ||
+                                     value.ValueKind == System.Text.Json.JsonValueKind.False))
+                                    _ = RestoreTheaterViaTrustedInputAsync(value.GetBoolean());
                             }
                         }
                         return;
