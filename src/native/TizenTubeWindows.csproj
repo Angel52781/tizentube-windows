@@ -30,6 +30,7 @@
   <ItemGroup>
     <EmbeddedResource Include="../../src/mods/tizentube.bundle.js" LogicalName="TizenTube.InjectedBundle" />
     <EmbeddedResource Include="../../src/ui/styles.css" LogicalName="TizenTube.InjectedStyles" />
+    <EmbeddedResource Include="floating_player.js" LogicalName="TizenTube.FloatingPlayer" />
   </ItemGroup>
 
   <ItemGroup>

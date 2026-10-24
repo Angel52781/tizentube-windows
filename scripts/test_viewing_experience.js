@@ -24,8 +24,12 @@ const theaterButton = {
   removeEventListener(k,fn) { if (theaterHandlers.get(k) === fn) theaterHandlers.delete(k); },
   click() { flexy.theater = !flexy.theater; theaterClicks++; theaterHandlers.get('click')?.(); }
 };
-const rightControls = { children: [], insertBefore(child) { this.children.push(child); domElements.set(child.id, child); },
-  querySelector() { return { id: 'settings' }; } };
+const settingsButton = { id: 'settings' };
+const rightControls = { children: [], insertBefore(child, next) {
+  this.children = this.children.filter(item => item !== child);
+  child.parentNode = this; child.nextSibling = next;
+  this.children.push(child); domElements.set(child.id, child);
+}, querySelector() { return settingsButton; } };
 const domElements = new Map();
 const video = { currentTime: 123, duration: 1800, addEventListener() {}, requestPictureInPicture: player.requestPictureInPicture };
 const playback = { videoElement: video, listeners: new Map(), on(e, f) { this.listeners.set(e,f); },
@@ -97,7 +101,7 @@ try {
   const click = button.handlers.get('click');
   click({ stopPropagation() {} });
   check(nativePipRequests, 1, 'Click invokes HTMLVideoElement.requestPictureInPicture');
-  check(button.title, 'Reproductor flotante · F9 (o Ctrl+Mayús+P)', 'User can identify the shortcut');
+  check(button.title, 'Reproductor flotante (F9)', 'User can identify the shortcut');
   check(ui.mountPipControl(), true, 'Existing PiP control reused');
   check(rightControls.children.length, 1, 'Repeated mounting does not duplicate floating buttons');
 
@@ -121,15 +125,18 @@ try {
   // yt-navigate-start previously set isNavigating=true. Old code returned
   // before clearing the flag and ignored every user theater change.
   local.delete(ui.theaterKey);
+  delete globalThis.window.__TT_THEATER_PREF;
   flexy.theater = false;
   ui.isNavigating = true;
   check(ui.syncTheaterMode(), true, 'Theater observer attaches without existing saved preference');
   check(ui.isNavigating, false, 'First-time preference clears navigation suppression');
   await Promise.resolve(); // finish microtask used to suppress our own restoration click
   theaterButton.click();
+  theaterHandlers.get('click')?.({ isTrusted: true });
   await new Promise(resolve => setTimeout(resolve, 230));
   check(local.get(ui.theaterKey), 'true', 'First user theater click saved after actual DOM update');
   theaterButton.click();
+  theaterHandlers.get('click')?.({ isTrusted: true });
   await new Promise(resolve => setTimeout(resolve, 230));
   check(local.get(ui.theaterKey), 'false', 'User switching back persists default player view');
   check(theaterHandlers.has('click'), true, 'Theater listener remains connected while mounted');

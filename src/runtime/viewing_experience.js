@@ -13,15 +13,35 @@ export class ViewingExperience {
     this.theaterObserver = null;
     this.theaterElement = null;
     this.theaterButton = null;
-    this._boundTheaterClick = () => {
-      // Snapshot YouTube's actual post-click layout. Only user clicks are
-      // recorded: our own restore clicks run with saveTheaterSuppressed=true.
-      if (this.saveTheaterSuppressed) return;
+    this.theaterUserChoicePending = false;
+    this._boundTheaterClick = e => {
+      // YouTube can dispatch synthetic size-button clicks on navigation.
+      // Only a trusted USER click changes the durable preference.
+      if (this.saveTheaterSuppressed || e?.isTrusted !== true) return;
+      this.theaterUserChoicePending = true;
       setTimeout(() => {
-        if (!this.disposed && this.getVideoId() && this.theaterElement)
+        if (!this.disposed && this.getVideoId() && this.theaterElement) {
           this.setTheaterPreference(this.theaterElement.hasAttribute('theater'));
+        }
+        this.theaterUserChoicePending = false;
       }, 180);
     };
+    this._boundTheaterKeyboard = e => {
+      if (!e?.isTrusted || e.repeat || e.altKey || e.ctrlKey || e.metaKey ||
+          e.key?.toLowerCase() !== 't' ||
+          ['INPUT', 'TEXTAREA'].includes(e.target?.tagName) || e.target?.isContentEditable ||
+          !this.getVideoId()) return;
+      this.theaterUserChoicePending = true;
+      setTimeout(() => {
+        if (!this.disposed && this.theaterElement)
+          this.setTheaterPreference(this.theaterElement.hasAttribute('theater'));
+        this.theaterUserChoicePending = false;
+      }, 250);
+    };
+    this.pipControls = null;
+    this.pipControlsObserver = null;
+    this.pipScanScheduled = false;
+    this.pipWatchdog = null;
     this.pipButton = null;
     // The native WebView2 controller handles floating shortcuts: Chromium
     // consumes Ctrl+Shift+P for Print before a document keydown can cancel it.
@@ -115,13 +135,22 @@ export class ViewingExperience {
 
   savedTheaterState() {
     try {
+      if (typeof window !== 'undefined' && typeof window.__TT_THEATER_PREF === 'boolean')
+        return window.__TT_THEATER_PREF;
       const value = this.getStorage()?.getItem(this.theaterKey);
       return value === 'true' ? true : value === 'false' ? false : null;
     } catch (_) { return null; }
   }
 
   setTheaterPreference(value) {
-    try { this.getStorage()?.setItem(this.theaterKey, String(Boolean(value))); }
+    try {
+      const enabled = Boolean(value);
+      this.getStorage()?.setItem(this.theaterKey, String(enabled));
+      if (typeof window !== 'undefined') {
+        window.__TT_THEATER_PREF = enabled;
+        window.chrome?.webview?.postMessage?.({ channel: 'viewing:theater', enabled });
+      }
+    }
     catch (_) {}
   }
 
@@ -139,9 +168,18 @@ export class ViewingExperience {
       this.theaterObserver?.disconnect();
       this.theaterElement = flexy;
       if (typeof MutationObserver !== 'undefined') {
-    this.theaterObserver = new MutationObserver(() => {
-          if (!this.saveTheaterSuppressed && !this.isNavigating)
-            this.setTheaterPreference(flexy.hasAttribute('theater'));
+        // Never SAVE automatic mutations: YouTube resets the 'theater'
+        // attribute on watch navigation, overwriting what the user chose.
+        this.theaterObserver = new MutationObserver(() => {
+          if (this.saveTheaterSuppressed || this.theaterUserChoicePending ||
+              this.isNavigating || this.disposed) return;
+          const wanted = this.savedTheaterState();
+          if (wanted !== null && flexy.hasAttribute('theater') !== wanted) {
+            // Delay reconciliation until YouTube finishes laying out its new
+            // player, rather than fighting its synchronous rendering.
+            if (this.retryTimer) clearTimeout(this.retryTimer);
+            this.retryTimer = setTimeout(() => this.syncTheaterMode(), 250);
+          }
         });
         this.theaterObserver.observe(flexy, { attributes: true, attributeFilter: ['theater'] });
       }
@@ -154,7 +192,7 @@ export class ViewingExperience {
       return true;
     }
     const current = flexy.hasAttribute('theater');
-    if (saved !== current) {
+    if (saved !== current && !this.theaterUserChoicePending) {
       this.saveTheaterSuppressed = true;
       try { theaterButton.click(); } finally {
         // Attribute changes can arrive via the next mutation microtask.
@@ -191,12 +229,18 @@ export class ViewingExperience {
     const controls = document.querySelector?.('.ytp-right-controls');
     if (!controls) return false;
     const existing = document.getElementById?.('tizentube-native-pip');
-    if (existing) { this.pipButton = existing; return true; }
+    if (existing && existing.parentNode === controls) {
+      const settings = controls.querySelector?.('.ytp-settings-button');
+      if (settings && existing.nextSibling !== settings) controls.insertBefore(existing, settings);
+      this.pipButton = existing;
+      return true;
+    }
+    if (existing) existing.remove?.();
     const button = document.createElement('button');
     button.id = 'tizentube-native-pip';
     button.type = 'button';
     button.className = 'ytp-button';
-    button.title = 'Reproductor flotante · F9 (o Ctrl+Mayús+P)';
+    button.title = 'Reproductor flotante (F9)';
     button.setAttribute('aria-label', 'Imagen en imagen');
     button.setAttribute('aria-pressed', 'false');
     button.innerHTML = '<svg viewBox="0 0 36 36" width="34" height="34" aria-hidden="true">' +
@@ -206,9 +250,28 @@ export class ViewingExperience {
       e.stopPropagation();
       if (!this.togglePictureInPicture()) button.title = 'Abre un vídeo para usar el reproductor flotante';
     });
+    // Exact requested location: immediately after CC, before YouTube settings.
+    const captions = controls.querySelector?.('.ytp-subtitles-button');
     const settings = controls.querySelector?.('.ytp-settings-button');
-    controls.insertBefore(button, settings || null);
+    if (settings) controls.insertBefore(button, settings);
+    else if (captions?.nextSibling) controls.insertBefore(button, captions.nextSibling);
+    else controls.appendChild?.(button);
     this.pipButton = button;
+    if (this.pipControls !== controls) {
+      this.pipControlsObserver?.disconnect();
+      this.pipControls = controls;
+      if (typeof MutationObserver !== 'undefined') {
+        this.pipControlsObserver = new MutationObserver(() => {
+          if (this.disposed || this.pipScanScheduled) return;
+          this.pipScanScheduled = true;
+          queueMicrotask(() => {
+            this.pipScanScheduled = false;
+            if (!this.disposed) this.mountPipControl();
+          });
+        });
+        this.pipControlsObserver.observe(controls, { childList: true });
+      }
+    }
     return true;
   }
 
@@ -249,8 +312,15 @@ export class ViewingExperience {
     window.addEventListener('popstate', this._boundNav);
     window.addEventListener('pagehide', this._boundVisibility);
     document?.addEventListener?.('visibilitychange', this._boundVisibility);
+    document?.addEventListener?.('keydown', this._boundTheaterKeyboard, true);
     this.playback?.on('timeupdate', this._boundTime);
     this.playback?.on('ready', this._boundReady);
+    // YouTube dynamically replaces control buttons without a full SPA
+    // navigation. Keep our requested CC → floating → settings placement.
+    if (typeof setInterval === 'function')
+      this.pipWatchdog = setInterval(() => {
+        if (!this.disposed && this.getVideoId()) this.mountPipControl();
+      }, 2200);
     this.onNavigation();
   }
 
@@ -258,7 +328,9 @@ export class ViewingExperience {
     this.flushProgress();
     this.disposed = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
+    if (this.pipWatchdog) clearInterval(this.pipWatchdog);
     this.theaterObserver?.disconnect();
+    this.pipControlsObserver?.disconnect();
     this.theaterButton?.removeEventListener?.('click', this._boundTheaterClick);
     this.pipButton?.remove?.();
     if (typeof window !== 'undefined') {
@@ -267,7 +339,10 @@ export class ViewingExperience {
       window.removeEventListener('popstate', this._boundNav);
       window.removeEventListener('pagehide', this._boundVisibility);
     }
-    if (typeof document !== 'undefined') document.removeEventListener?.('visibilitychange', this._boundVisibility);
+    if (typeof document !== 'undefined') {
+      document.removeEventListener?.('visibilitychange', this._boundVisibility);
+      document.removeEventListener?.('keydown', this._boundTheaterKeyboard, true);
+    }
     this.playback?.off?.('timeupdate', this._boundTime);
     this.playback?.off?.('ready', this._boundReady);
   }

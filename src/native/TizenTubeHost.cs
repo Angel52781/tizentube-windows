@@ -37,6 +37,7 @@ namespace TizenTubeWindows
         public bool FloatingWindowTest { get; set; } = false;
         public bool WindowPlacementTest { get; set; } = false;
         public bool FloatingHotKeyTest { get; set; } = false;
+        public bool FloatingVisualProbe { get; set; } = false;
 
         public static HostOptions Parse(string[] args)
         {
@@ -112,6 +113,10 @@ namespace TizenTubeWindows
                 else if (arg == "--floating-hotkey-test")
                 {
                     options.FloatingHotKeyTest = true;
+                }
+                else if (arg == "--floating-visual-probe")
+                {
+                    options.FloatingVisualProbe = true;
                 }
                 else if (arg == "--help" || arg == "-h")
                 {
@@ -201,6 +206,8 @@ namespace TizenTubeWindows
         private System.Windows.Forms.Timer memoryTrimTimer;
         private System.Windows.Forms.Timer smokeTestTimer;
         private string appDataDir;
+        private string theaterPreferenceFile;
+        private bool floatingVisualProbeStarted = false;
         private long blockedAdCount = 0;
         private long trimCount = 0;
         private long modsInitializedCount = 0;
@@ -265,6 +272,9 @@ namespace TizenTubeWindows
                 "TizenTube", this.options.TvMode ? "TVUserData" : "UserData"
             );
             Directory.CreateDirectory(appDataDir);
+            theaterPreferenceFile = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "TizenTube", this.options.TvMode ? "tv-theater-preference.json" : "theater-preference.json");
             // Window layout is independent of WebView2's Google login data.
             windowPlacementFile = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -413,6 +423,16 @@ namespace TizenTubeWindows
                 SetupIpcBridge();
                 SetupAdblockDiagnosticMenu();
                 await InjectModsAsync();
+
+                if (options.FloatingVisualProbe)
+                {
+                    webView.CoreWebView2.NavigationCompleted += async (sender, nav) =>
+                    {
+                        if (!nav.IsSuccess || floatingVisualProbeStarted || IsDisposed) return;
+                        floatingVisualProbeStarted = true;
+                        await CaptureFloatingVisualProbeAsync();
+                    };
+                }
 
                 string navUrl = !string.IsNullOrEmpty(options.InitialUrl) ? options.InitialUrl : "https://www.youtube.com";
                 webView.Source = new Uri(navUrl);
@@ -792,27 +812,34 @@ namespace TizenTubeWindows
             finally { ResumeLayout(); }
         }
 
-        private const string FloatingVideoCss = @"
-html.tt-floating-mode, html.tt-floating-mode body { overflow: hidden !important; height: 100vh !important; }
-html.tt-floating-mode ytd-app, html.tt-floating-mode ytd-watch-flexy,
-html.tt-floating-mode #content, html.tt-floating-mode #page-manager,
-html.tt-floating-mode #player, html.tt-floating-mode #player-container,
-html.tt-floating-mode #player-container-outer, html.tt-floating-mode #full-bleed-container {
-  overflow: visible !important; contain: none !important; transform: none !important;
-}
-html.tt-floating-mode .html5-video-player, html.tt-floating-mode #movie_player {
-  position: fixed !important; inset: 0 !important;
-  width: 100vw !important; height: 100vh !important;
-  max-width: none !important; max-height: none !important;
-  z-index: 2147483645 !important; background: #000 !important;
-  transform: none !important;
-}
-html.tt-floating-mode .html5-main-video {
-  position: absolute !important; inset: 0 !important; left: 0 !important; top: 0 !important;
-  width: 100% !important; height: 100% !important; object-fit: contain !important;
-}
-html.tt-floating-mode .ytp-chrome-bottom { bottom: 0 !important; }
-";
+        private async Task CaptureFloatingVisualProbeAsync()
+        {
+            // Developer-only local functional probe (never sent to GitHub).
+            // Screenshots can contain personal account information; the caller
+            // is responsible for keeping them on the owner's computer.
+            try
+            {
+                await Task.Delay(14000); // YouTube SPA/player can initialize late.
+                if (IsDisposed || webView?.CoreWebView2 == null) return;
+                string folder = Path.GetDirectoryName(options.TelemetryFilePath ?? "");
+                if (string.IsNullOrEmpty(folder)) folder = appDataDir;
+                Directory.CreateDirectory(folder);
+                string before = await webView.CoreWebView2.ExecuteScriptAsync(
+                    "window.__ttFloating?.diagnostics() || null");
+                File.WriteAllText(Path.Combine(folder, "floating-before.json"), before);
+                await ToggleFloatingWindowAsync();
+                await Task.Delay(2300);
+                string after = await webView.CoreWebView2.ExecuteScriptAsync(
+                    "window.__ttFloating?.diagnostics() || null");
+                File.WriteAllText(Path.Combine(folder, "floating-after.json"), after);
+                using (var stream = File.Create(Path.Combine(folder, "floating-preview.png")))
+                    await webView.CoreWebView2.CapturePreviewAsync(
+                        CoreWebView2CapturePreviewImageFormat.Png, stream);
+                Console.WriteLine("[Host PiP] Local screenshot and media layout probe saved");
+                await ToggleFloatingWindowAsync(true);
+            }
+            catch (Exception ex) { Console.Error.WriteLine("[Host PiP Probe] " + ex.Message); }
+        }
 
         private async Task ToggleFloatingWindowAsync(bool restore = false)
         {
@@ -821,26 +848,26 @@ html.tt-floating-mode .ytp-chrome-bottom { bottom: 0 !important; }
             {
                 SetNativeFloatingWindow(false);
                 await webView.CoreWebView2.ExecuteScriptAsync(
-                    "document.documentElement.classList.remove('tt-floating-mode'); " +
-                    "document.getElementById('tizentube-native-pip')?.setAttribute('aria-pressed','false');");
+                    "window.__ttFloating?.stop()");
                 return;
             }
             if (nativeImmersiveActive || webPlayerFullscreen) return;
-            // Only resize after confirming this is an active YouTube watch
-            // video. Do not enter a blank tiny window on Home or playlists.
-            string cssLiteral = Convert.ToBase64String(Encoding.UTF8.GetBytes(FloatingVideoCss));
-            string script = "(() => { if (location.pathname !== '/watch' || " +
-                "!document.querySelector('video.html5-main-video') || " +
-                "!document.querySelector('#movie_player')) return false; " +
-                "let s = document.getElementById('tt-floating-video-css'); " +
-                "if (!s) { s = document.createElement('style'); s.id = 'tt-floating-video-css'; " +
-                "s.textContent = new TextDecoder().decode(Uint8Array.from(atob('" + cssLiteral +
-                "'), c => c.charCodeAt(0))); document.head.appendChild(s); } " +
-                "document.documentElement.classList.add('tt-floating-mode'); " +
-                "document.getElementById('tizentube-native-pip')?.setAttribute('aria-pressed','true'); " +
-                "return true; })()";
-            string activated = await webView.CoreWebView2.ExecuteScriptAsync(script);
-            if (activated == "true") SetNativeFloatingWindow(true);
+            // Move the SAME #movie_player to body instead of positioning it
+            // under YouTube's clipped/transformed watch ancestors. The old
+            // fixed CSS rendered controls but only black video in real usage.
+            string activated = await webView.CoreWebView2.ExecuteScriptAsync(
+                "window.__ttFloating?.start() === true");
+            if (activated == "true")
+            {
+                SetNativeFloatingWindow(true);
+                if (options.SmokeTest)
+                {
+                    await Task.Delay(700);
+                    string metrics = await webView.CoreWebView2.ExecuteScriptAsync(
+                        "window.__ttFloating?.diagnostics() || null");
+                    File.WriteAllText(Path.Combine(appDataDir, "floating-video-diagnostic.json"), metrics);
+                }
+            }
         }
 
         private void SetupIpcBridge()
@@ -862,6 +889,28 @@ html.tt-floating-mode .ytp-chrome-bottom { bottom: 0 !important; }
                         {
                             bool restore = json.Contains("\"channel\":\"window:restore-floating\"");
                             _ = ToggleFloatingWindowAsync(restore);
+                        }
+                        return;
+                    }
+
+                    if (json.Contains("\"channel\":\"viewing:theater\""))
+                    {
+                        if (Uri.TryCreate(args.Source, UriKind.Absolute, out Uri sender) &&
+                            sender.Scheme == "https" &&
+                            (sender.Host == "www.youtube.com" || sender.Host == "youtube.com") &&
+                            json.Length < 500)
+                        {
+                            using (var parsed = System.Text.Json.JsonDocument.Parse(json))
+                            {
+                                if (parsed.RootElement.TryGetProperty("enabled", out var value) &&
+                                    (value.ValueKind == System.Text.Json.JsonValueKind.True ||
+                                     value.ValueKind == System.Text.Json.JsonValueKind.False))
+                                {
+                                    string tmp = theaterPreferenceFile + ".tmp";
+                                    File.WriteAllText(tmp, value.GetBoolean() ? "true" : "false");
+                                    File.Move(tmp, theaterPreferenceFile, true);
+                                }
+                            }
                         }
                         return;
                     }
@@ -980,6 +1029,18 @@ html.tt-floating-mode .ytp-chrome-bottom { bottom: 0 !important; }
             }
 
             // 3. Inject the complete, version-matched in-assembly IIFE bundle.
+            // Video compositing fix lives in a separate, auditable script.
+            await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                ReadEmbeddedRequired("TizenTube.FloatingPlayer"));
+            // The owner's explicit theater preference is durable independently
+            // of YouTube's own UI resets or localStorage migrations.
+            if (File.Exists(theaterPreferenceFile))
+            {
+                string preferred = File.ReadAllText(theaterPreferenceFile).Trim();
+                if (preferred == "true" || preferred == "false")
+                    await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                        "window.__TT_THEATER_PREF = " + preferred + ";");
+            }
             await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(scriptContent);
         }
 
