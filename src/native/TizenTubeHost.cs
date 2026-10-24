@@ -453,8 +453,15 @@ namespace TizenTubeWindows
                     "--enable-font-antialiasing " +
                     "--force-color-profile=srgb";
 
-                var envOptions = new CoreWebView2EnvironmentOptions(chromiumArgs);
-                var env = await CoreWebView2Environment.CreateAsync(null, appDataDir, envOptions);
+                // Clean control case: no custom Chromium memory/GPU flags,
+                // no production WebView profile, no mod injections/filters.
+                var envOptions = options.UnmodifiedWebViewProbe
+                    ? new CoreWebView2EnvironmentOptions()
+                    : new CoreWebView2EnvironmentOptions(chromiumArgs);
+                var browserProfile = options.UnmodifiedWebViewProbe
+                    ? Path.Combine(appDataDir, "diagnostic-unmodified")
+                    : appDataDir;
+                var env = await CoreWebView2Environment.CreateAsync(null, browserProfile, envOptions);
                 await webView.EnsureCoreWebView2Async(env);
 
                 ConfigureWebViewSettings();
