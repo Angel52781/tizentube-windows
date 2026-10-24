@@ -1003,10 +1003,17 @@ class ViewingExperience {
     if (typeof document === 'undefined' || !this.getVideoId()) return false;
     const controls = document.querySelector?.('.ytp-right-controls');
     if (!controls) return false;
+    // Actual YouTube DOM: right-controls > .ytp-right-controls-left >
+    // [CC, settings]. Inserting into right-controls put our button BEFORE
+    // the entire wrapper instead of BETWEEN CC and settings (physical E2E).
+    const settings = controls.querySelector?.('.ytp-settings-button');
+    const captions = controls.querySelector?.('.ytp-subtitles-button');
+    const destination = settings?.parentElement || captions?.parentElement || controls;
+    const beforeSettings = settings?.parentElement === destination ? settings : null;
     const existing = document.getElementById?.('tizentube-native-pip');
-    if (existing && existing.parentNode === controls) {
-      const settings = controls.querySelector?.('.ytp-settings-button');
-      if (settings && existing.nextSibling !== settings) controls.insertBefore(existing, settings);
+    if (existing && existing.parentNode === destination) {
+      if (beforeSettings && existing.nextSibling !== beforeSettings)
+        destination.insertBefore(existing, beforeSettings);
       this.pipButton = existing;
       return true;
     }
@@ -1039,20 +1046,14 @@ class ViewingExperience {
       if (!this.togglePictureInPicture()) button.title = 'Abre un vídeo para usar el reproductor flotante';
     });
     // Exact requested location: immediately after CC, before YouTube settings.
-    const captions = controls.querySelector?.('.ytp-subtitles-button');
-    const settings = controls.querySelector?.('.ytp-settings-button');
-    // .ytp-settings-button may live in a wrapper instead of being a direct
-    // .ytp-right-controls child. insertBefore() requires a direct child.
-    let settingsChild = settings;
-    while (settingsChild && settingsChild.parentElement !== controls)
-      settingsChild = settingsChild.parentElement;
-    if (settingsChild) controls.insertBefore(button, settingsChild);
-    else if (captions?.nextSibling) controls.insertBefore(button, captions.nextSibling);
-    else controls.appendChild?.(button);
+    if (beforeSettings) destination.insertBefore(button, beforeSettings);
+    else if (captions?.nextSibling && captions.parentElement === destination)
+      destination.insertBefore(button, captions.nextSibling);
+    else destination.appendChild?.(button);
     this.pipButton = button;
-    if (this.pipControls !== controls) {
+    if (this.pipControls !== destination) {
       this.pipControlsObserver?.disconnect();
-      this.pipControls = controls;
+      this.pipControls = destination;
       if (typeof MutationObserver !== 'undefined') {
         this.pipControlsObserver = new MutationObserver(() => {
           if (this.disposed || this.pipScanScheduled) return;
@@ -1062,7 +1063,7 @@ class ViewingExperience {
             if (!this.disposed) this.mountPipControl();
           });
         });
-        this.pipControlsObserver.observe(controls, { childList: true });
+        this.pipControlsObserver.observe(destination, { childList: true });
       }
     }
     return true;

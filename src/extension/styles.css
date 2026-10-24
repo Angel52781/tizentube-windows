@@ -43,7 +43,7 @@
 
 /* Always-visible native PiP control, inserted between CC and settings.
  * YouTube re-renders these controls on navigation; keep their native shape. */
-.ytp-right-controls > #tizentube-native-pip.ytp-button {
+.ytp-right-controls #tizentube-native-pip.ytp-button {
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
@@ -55,8 +55,9 @@
   cursor: pointer;
   visibility: visible !important;
   opacity: 1 !important;
+  flex: 0 0 48px;
 }
-.ytp-right-controls > #tizentube-native-pip.ytp-button:hover { color: #eee; }
+.ytp-right-controls #tizentube-native-pip.ytp-button:hover { color: #eee; }
 
 /* ============================================================================
    Common Button & Form Styles

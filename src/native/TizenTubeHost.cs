@@ -919,6 +919,18 @@ namespace TizenTubeWindows
                     await webView.CoreWebView2.ExecuteScriptAsync(viewingProbe));
                 File.WriteAllText(Path.Combine(folder, options.TheaterUserProbe
                     ? "theater-after-click.json" : "theater-after-restart.json"), snapshot);
+                if (options.TheaterRestoreProbe)
+                {
+                    await Task.Delay(12500);
+                    if (!IsDisposed && webView?.CoreWebView2 != null)
+                    {
+                        File.WriteAllText(Path.Combine(folder, "theater-after-settle.json"),
+                            await webView.CoreWebView2.ExecuteScriptAsync(
+                                "window.__ttFloating?.diagnostics() || null"));
+                        File.WriteAllText(Path.Combine(folder, "theater-restore-count.txt"),
+                            Interlocked.Read(ref nativeTheaterRestored).ToString());
+                    }
+                }
                 string persisted = File.Exists(theaterPreferenceFile)
                     ? File.ReadAllText(theaterPreferenceFile) : "NOT_SAVED";
                 File.WriteAllText(Path.Combine(folder, "theater-native-preference.txt"), persisted);
