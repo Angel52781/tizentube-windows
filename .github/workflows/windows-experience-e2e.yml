@@ -92,6 +92,11 @@ jobs:
           # sees the actual script exit status instead of a stale value.
           & pwsh -NoProfile -File ./scripts/ci_windows_experience.ps1 -Executable windows-experience-host/TizenTubeHost.exe -EvidenceDirectory windows-experience-evidence
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_REAL_VIDEO_E2E_FAILED' }
+      - name: Validate P0 Normal -> Cinema -> Floating -> Fullscreen -> Return cycle
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File ./scripts/ci_windows_floating_cycle.ps1 -Executable windows-experience-host/TizenTubeHost.exe -EvidenceDirectory windows-experience-evidence/cycle
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_FLOATING_CYCLE_FAILED' }
       - name: Validate process-tree CPU and private RAM performance telemetry
         shell: pwsh
         run: |

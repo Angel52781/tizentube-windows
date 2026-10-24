@@ -38,6 +38,7 @@ namespace TizenTubeWindows
         public bool WindowPlacementTest { get; set; } = false;
         public bool FloatingHotKeyTest { get; set; } = false;
         public bool FloatingVisualProbe { get; set; } = false;
+        public bool FloatingCycleProbe { get; set; } = false;
         public bool TheaterUserProbe { get; set; } = false;
         public bool TheaterRestoreProbe { get; set; } = false;
         public bool PreferencesSetupProbe { get; set; } = false;
@@ -128,6 +129,10 @@ namespace TizenTubeWindows
                 else if (arg == "--floating-visual-probe")
                 {
                     options.FloatingVisualProbe = true;
+                }
+                else if (arg == "--floating-cycle-probe")
+                {
+                    options.FloatingCycleProbe = true;
                 }
                 else if (arg == "--theater-user-probe")
                 {
@@ -281,10 +286,12 @@ namespace TizenTubeWindows
         private System.Windows.Forms.Timer smokeTestTimer;
         private string appDataDir;
         private string theaterPreferenceFile;
+        private string lastVideoSessionFile;
         private bool theaterRestoreInProgress = false;
         private DateTime lastTheaterRestoreAttemptUtc = DateTime.MinValue;
         private long nativeTheaterRestored = 0;
         private bool floatingVisualProbeStarted = false;
+        private bool floatingCycleProbeStarted = false;
         private bool theaterProbeStarted = false;
         private bool preferencesProbeStarted = false;
         private bool keyboardProbeStarted = false;
@@ -340,6 +347,7 @@ namespace TizenTubeWindows
             this.MinimizeBox = true;
             this.StartPosition = FormStartPosition.CenterScreen;
             this.MaximizedBounds = Screen.PrimaryScreen.WorkingArea;
+            this.BackColor = Color.FromArgb(15, 15, 15);
             try { this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; }
             catch { this.Icon = SystemIcons.Application; }
 
@@ -367,9 +375,15 @@ namespace TizenTubeWindows
             theaterPreferenceFile = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "TizenTube", this.options.TvMode ? "tv-theater-preference.json" : "theater-preference.json");
+            lastVideoSessionFile = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "TizenTube", this.options.TvMode ? "tv-last-video-session.json" : "last-video-session.json");
             if ((options.SessionSetupProbe || options.SessionRestoreProbe) &&
                 !string.IsNullOrWhiteSpace(sessionTestRoot))
+            {
                 theaterPreferenceFile = Path.Combine(sessionTestRoot, "theater-preference.json");
+                lastVideoSessionFile = Path.Combine(sessionTestRoot, "last-video-session.json");
+            }
             // Window layout is independent of WebView2's Google login data.
             windowPlacementFile = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -564,6 +578,9 @@ namespace TizenTubeWindows
                                 "return {saved:localStorage.getItem('tizentube.lastVideo.v1')!==null};})()");
                             File.WriteAllText(Path.Combine(folder, "session-setup.json"), proof);
                             File.WriteAllText(theaterPreferenceFile, "true");
+                            string sessionJson = "{\"id\":\"aqz-KE-bpKQ\",\"position\":137,\"duration\":2100,\"updatedAt\":" +
+                                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + "}";
+                            File.WriteAllText(lastVideoSessionFile, sessionJson);
                             if (!proof.Contains("\"saved\":true")) ExitCode = 14;
                         }
                         else
@@ -598,7 +615,8 @@ namespace TizenTubeWindows
                 DragNativeWindow,
                 () => { WindowState = FormWindowState.Minimized; },
                 ToggleNativeMaximize,
-                () => { Close(); });
+                () => { Close(); },
+                () => { _ = ToggleFloatingWindowAsync(true); });
             navigationToolbar.Dock = DockStyle.Fill;
             navigationToolbar.Margin = Padding.Empty;
             chromeLayout.Controls.Add(navigationToolbar, 0, 0);
@@ -608,7 +626,7 @@ namespace TizenTubeWindows
 
         private void DragNativeWindow()
         {
-            if (nativeImmersiveActive || nativeFloatingActive) return;
+            if (nativeImmersiveActive) return;
             // Send a native NC caption interaction to preserve Windows drag,
             // Aero Snap and the standard window move behavior.
             ReleaseCapture();
@@ -632,7 +650,7 @@ namespace TizenTubeWindows
         {
             if (m.Msg != WmNcHitTest || m.Result.ToInt64() != HtClient ||
                 WindowState != FormWindowState.Normal ||
-                nativeImmersiveActive || nativeFloatingActive ||
+                nativeImmersiveActive ||
                 FormBorderStyle != FormBorderStyle.None) return;
             // A borderless Windows form normally cannot be resized. Return
             // genuine non-client hit-test codes for the screen-edge grips.
@@ -662,7 +680,7 @@ namespace TizenTubeWindows
         private void UpdateNavigationToolbarVisibility()
         {
             if (navigationToolbar == null || chromeLayout == null || IsDisposed) return;
-            bool visible = !nativeImmersiveActive && !nativeFloatingActive;
+            bool visible = !nativeImmersiveActive;
             chromeLayout.SuspendLayout();
             try
             {
@@ -678,11 +696,13 @@ namespace TizenTubeWindows
             {
                 webView = new WebView2 { Dock = DockStyle.Fill };
                 webView.Margin = Padding.Empty;
+                webView.DefaultBackgroundColor = Color.FromArgb(15, 15, 15);
                 // A dedicated layout row prevents the native bar from
                 // overlapping YouTube. Fullscreen collapses that row.
                 chromeLayout = new TableLayoutPanel {
                     Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2,
-                    Margin = Padding.Empty, Padding = Padding.Empty
+                    Margin = Padding.Empty, Padding = Padding.Empty,
+                    BackColor = Color.FromArgb(15, 15, 15)
                 };
                 chromeLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
                 chromeLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
@@ -721,6 +741,7 @@ namespace TizenTubeWindows
                     : appDataDir;
                 var env = await CoreWebView2Environment.CreateAsync(null, browserProfile, envOptions);
                 await webView.EnsureCoreWebView2Async(env);
+                try { webView.CoreWebView2.DefaultBackgroundColor = Color.FromArgb(255, 15, 15, 15); } catch { }
                 webView.CoreWebView2.HistoryChanged += (sender, eventArgs) => UpdateNavigationToolbar();
                 webView.CoreWebView2.SourceChanged += (sender, eventArgs) => UpdateNavigationToolbar();
                 webView.CoreWebView2.DocumentTitleChanged += (sender, eventArgs) => UpdateNavigationToolbar();
@@ -745,6 +766,15 @@ namespace TizenTubeWindows
                         if (!nav.IsSuccess || floatingVisualProbeStarted || IsDisposed) return;
                         floatingVisualProbeStarted = true;
                         await CaptureFloatingVisualProbeAsync();
+                    };
+                }
+                if (options.FloatingCycleProbe)
+                {
+                    webView.CoreWebView2.NavigationCompleted += async (sender, nav) =>
+                    {
+                        if (!nav.IsSuccess || floatingCycleProbeStarted || IsDisposed) return;
+                        floatingCycleProbeStarted = true;
+                        await CaptureFloatingCycleProbeAsync();
                     };
                 }
                 if (options.TheaterUserProbe || options.TheaterRestoreProbe)
@@ -786,7 +816,7 @@ namespace TizenTubeWindows
                     };
                 }
 
-                string navUrl = !string.IsNullOrEmpty(options.InitialUrl) ? options.InitialUrl : "https://www.youtube.com";
+                string navUrl = !string.IsNullOrEmpty(options.InitialUrl) ? options.InitialUrl : GetDefaultLaunchUrl();
                 webView.Source = new Uri(navUrl);
             }
             catch (Exception ex)
@@ -1078,6 +1108,7 @@ namespace TizenTubeWindows
             {
                 SetNativeFloatingWindow(false);
                 _ = webView?.CoreWebView2?.ExecuteScriptAsync(
+                    "window.__ttFloating?.stop();" +
                     "document.documentElement.classList.remove('tt-floating-mode');" +
                     "document.getElementById('tizentube-native-pip')?.setAttribute('aria-pressed','false');");
             }
@@ -1111,11 +1142,16 @@ namespace TizenTubeWindows
                 if (boundsBeforeFullscreen.Width > 0 && boundsBeforeFullscreen.Height > 0)
                     this.Bounds = boundsBeforeFullscreen;
                 if (stateBeforeFullscreen == FormWindowState.Maximized)
+                {
+                    MaximizedBounds = Screen.FromControl(this).WorkingArea;
                     this.WindowState = FormWindowState.Maximized;
+                }
                 // Do not restore Minimized: a user exiting video fullscreen
                 // should always see a usable window.
                 this.ResumeLayout();
                 UpdateNavigationToolbarVisibility();
+                _ = webView?.CoreWebView2?.ExecuteScriptAsync(
+                    "window.dispatchEvent(new Event('resize'));");
             }
         }
 
@@ -1140,14 +1176,15 @@ namespace TizenTubeWindows
                     nativeFloatingActive = true;
                     WindowState = FormWindowState.Normal;
                     MinimumSize = new Size(320, 220);
-                    FormBorderStyle = FormBorderStyle.SizableToolWindow;
-                    Text = "TizenTube · Reproductor flotante";
+                    FormBorderStyle = FormBorderStyle.None;
                     var area = Screen.FromControl(this).WorkingArea;
                     int w = Math.Min(500, Math.Max(330, area.Width - 35));
-                    int h = (int)Math.Round(w * 9.0 / 16.0) + 36;
+                    int h = (int)Math.Round(w * 9.0 / 16.0) + 38;
                     Bounds = new Rectangle(area.Right - w - 22,
                         area.Bottom - h - 22, w, h);
                     TopMost = true;
+                    navigationToolbar?.SetFloatingMode(true);
+                    UpdateNavigationToolbar();
                     Activate();
                 }
                 else
@@ -1160,8 +1197,12 @@ namespace TizenTubeWindows
                     if (boundsBeforeFloating.Width > 0 && boundsBeforeFloating.Height > 0)
                         Bounds = boundsBeforeFloating;
                     if (stateBeforeFloating == FormWindowState.Maximized)
+                    {
+                        MaximizedBounds = Screen.FromControl(this).WorkingArea;
                         WindowState = FormWindowState.Maximized;
-                    Text = "TizenTube";
+                    }
+                    navigationToolbar?.SetFloatingMode(false);
+                    UpdateNavigationToolbar();
                 }
             }
             finally
@@ -1423,6 +1464,105 @@ namespace TizenTubeWindows
             catch (Exception ex) { Console.Error.WriteLine("[Host PiP Probe] " + ex.Message); }
         }
 
+        private string GetDefaultLaunchUrl()
+        {
+            try
+            {
+                if (File.Exists(lastVideoSessionFile))
+                {
+                    string json = File.ReadAllText(lastVideoSessionFile);
+                    using (var doc = System.Text.Json.JsonDocument.Parse(json))
+                    {
+                        var root = doc.RootElement;
+                        if (root.TryGetProperty("id", out var idProp))
+                        {
+                            string id = idProp.GetString();
+                            if (!string.IsNullOrEmpty(id) && id.Length == 11)
+                            {
+                                int pos = 0;
+                                if (root.TryGetProperty("position", out var posProp))
+                                    pos = posProp.GetInt32();
+                                return $"https://www.youtube.com/watch?v={id}&t={Math.Max(0, pos)}s";
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+            return "https://www.youtube.com";
+        }
+
+        private async Task CaptureFloatingCycleProbeAsync()
+        {
+            try
+            {
+                string folder = Path.GetDirectoryName(options.TelemetryFilePath ?? "");
+                if (string.IsNullOrEmpty(folder)) folder = appDataDir;
+                Directory.CreateDirectory(folder);
+
+                string probeScript = "(() => {const v=document.querySelector('video.html5-main-video');" +
+                    "const f=document.querySelector('ytd-watch-flexy');" +
+                    "const floatDiag=window.__ttFloating?.diagnostics?.() || null;" +
+                    "return {readyState:v?.readyState??-1,videoWidth:v?.videoWidth??0," +
+                    "currentTime:v?.currentTime??0,paused:v?.paused??true," +
+                    "theater:f?f.hasAttribute('theater'):false," +
+                    "floating:floatDiag?.active??false," +
+                    "playerInBody:floatDiag?.playerInBody??false," +
+                    "fullscreen:!!document.fullscreenElement};})()";
+
+                await Task.Delay(10000);
+                if (IsDisposed || webView?.CoreWebView2 == null) return;
+
+                // 1. Normal
+                string s1 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
+                File.WriteAllText(Path.Combine(folder, "cycle-01-normal.json"), s1);
+
+                // 2. Theater
+                await webView.CoreWebView2.ExecuteScriptAsync(
+                    "(() => {const b=document.querySelector('.ytp-size-button');b?.click();})()");
+                await Task.Delay(1200);
+                string s2 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
+                File.WriteAllText(Path.Combine(folder, "cycle-02-theater.json"), s2);
+
+                // 3. Floating
+                await ToggleFloatingWindowAsync(false);
+                await Task.Delay(1500);
+                string s3 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
+                File.WriteAllText(Path.Combine(folder, "cycle-03-floating.json"), s3);
+
+                // 4. Fullscreen
+                webPlayerFullscreen = true;
+                UpdateNativeImmersiveMode();
+                await Task.Delay(1500);
+                string s4 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
+                File.WriteAllText(Path.Combine(folder, "cycle-04-fullscreen.json"), s4);
+
+                // 5. Return
+                webPlayerFullscreen = false;
+                UpdateNativeImmersiveMode();
+                await Task.Delay(1500);
+                string s5 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
+                File.WriteAllText(Path.Combine(folder, "cycle-05-return.json"), s5);
+
+                var summary = new {
+                    success = true,
+                    step1_normal = System.Text.Json.JsonDocument.Parse(s1).RootElement,
+                    step2_theater = System.Text.Json.JsonDocument.Parse(s2).RootElement,
+                    step3_floating = System.Text.Json.JsonDocument.Parse(s3).RootElement,
+                    step4_fullscreen = System.Text.Json.JsonDocument.Parse(s4).RootElement,
+                    step5_return = System.Text.Json.JsonDocument.Parse(s5).RootElement
+                };
+                File.WriteAllText(Path.Combine(folder, "floating-cycle-summary.json"),
+                    System.Text.Json.JsonSerializer.Serialize(summary));
+                Console.WriteLine("[Host Cycle Probe] P0 Floating cycle probe completed successfully");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("[Host Cycle Probe] Error: " + ex.Message);
+            }
+        }
+        }
+
         private async Task CaptureTheaterProbeAsync()
         {
             // Local-only functional test: real WebView2 CDP mouse click,
@@ -1657,7 +1797,7 @@ namespace TizenTubeWindows
                 // video frame with a real, hit-tested click. We cannot mutate
                 // 'theater' prematurely; that collapsed the player in E2E.
                 string buttonPoint = "null";
-                for (int check = 0; check < 32; check++)
+                for (int check = 0; check < 40; check++)
                 {
                     if (IsDisposed || webView?.CoreWebView2 == null || nativeFloatingActive) return;
                     buttonPoint = await webView.CoreWebView2.ExecuteScriptAsync(
@@ -1667,7 +1807,7 @@ namespace TizenTubeWindows
                         "const r=b.getBoundingClientRect();" +
                         "return r.width>5&&r.height>5?{x:r.left+r.width/2,y:r.top+r.height/2}:null;})()");
                     if (buttonPoint != "null") break;
-                    await Task.Delay(180);
+                    await Task.Delay(50);
                 }
                 if (buttonPoint == "null") return;
                 double mouseX, mouseY;
@@ -1682,7 +1822,7 @@ namespace TizenTubeWindows
                     type = "mouseMoved", x = mouseX, y = mouseY });
                 await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
                     "Input.dispatchMouseEvent", move);
-                await Task.Delay(240);
+                await Task.Delay(60);
                 string coords = await webView.CoreWebView2.ExecuteScriptAsync(
                     "(() => {const b=document.querySelector('.ytp-size-button');" +
                     "const f=document.querySelector('ytd-watch-flexy');" +
@@ -1824,6 +1964,26 @@ namespace TizenTubeWindows
                                     _ = RestoreTheaterViaTrustedInputAsync(value.GetBoolean());
                             }
                         }
+                        return;
+                    }
+
+                    if (json.Contains("\"channel\":\"viewing:last-video\""))
+                    {
+                        if (Uri.TryCreate(args.Source, UriKind.Absolute, out Uri sender) &&
+                            sender.Scheme == "https" &&
+                            (sender.Host == "www.youtube.com" || sender.Host == "youtube.com") &&
+                            json.Length < 1000)
+                        {
+                            string tmp = lastVideoSessionFile + ".tmp";
+                            File.WriteAllText(tmp, json);
+                            File.Move(tmp, lastVideoSessionFile, true);
+                        }
+                        return;
+                    }
+
+                    if (json.Contains("\"channel\":\"viewing:clear-last-video\""))
+                    {
+                        try { if (File.Exists(lastVideoSessionFile)) File.Delete(lastVideoSessionFile); } catch { }
                         return;
                     }
 

@@ -93,6 +93,7 @@ try {
   const ui = new ViewingExperience(playback);
   check(ui.getVideoId(), videoId, 'Video IDs scoped to YouTube watch URLs');
   check(ui.getVideoId('https://evil.example/watch?v='+videoId), null, 'External URLs never stored');
+  globalThis.window.chrome = { webview: { postMessage: msg => hostMessages.push(msg) } };
   ui.persistProgress(true);
   check(JSON.parse(local.get(ui.lastKey)).position, 123, 'Progress is persisted locally');
   check(JSON.parse(local.get(ui.lastKey)).duration, 1800, 'Duration saved to detect completed videos');
@@ -100,6 +101,16 @@ try {
   ui.persistProgress(true);
   check(JSON.parse(local.get(ui.lastKey)).position, 156, 'Progress updated on force flush');
   check(JSON.parse(local.get(ui.lastKey)).id, videoId, 'Only video ID, not title or account, stored');
+  const lastVideoMsg = hostMessages.filter(m => m.channel === 'viewing:last-video').pop();
+  check(lastVideoMsg?.id, videoId, 'Host receives last-video IPC for direct startup resume');
+  check(lastVideoMsg?.position, 156, 'Host receives video position for direct startup resume');
+
+  ui.clearCompletedVideo();
+  const clearMsg = hostMessages.find(m => m.channel === 'viewing:clear-last-video');
+  check(clearMsg !== undefined, true, 'Host receives clear-last-video IPC when completed');
+  // Re-save for downstream tests
+  ui.persistProgress(true);
+  delete globalThis.window.chrome;
 
   ui.setTheaterPreference(true);
   ui.syncTheaterMode();
@@ -124,6 +135,7 @@ try {
   // WebView2 disables document.pictureInPictureEnabled on some builds. The
   // floating button MUST remain visible and use the native host fallback.
   globalThis.document.pictureInPictureEnabled = false;
+  hostMessages.length = 0;
   globalThis.window.chrome = { webview: { postMessage: msg => hostMessages.push(msg) } };
   check(ui.mountPipControl(), true, 'Button remains accessible with Chromium PiP unavailable');
   check(ui.togglePictureInPicture(), true, 'WebView2 uses same-window native floating mode');

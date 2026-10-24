@@ -142,11 +142,19 @@ export function buildBundle() {
         }
       } catch (_) {}
     }
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    try {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(target, bundleSource, 'utf8');
+      console.log(`[OK] Generated bundle at: ${path.relative(projectRoot, target)} (${bundleSource.length} bytes)`);
+    } catch (e) {
+      if (e.code === 'EROFS' || e.code === 'EACCES') {
+        console.log(`[WARN] Skipping read-only target: ${path.relative(projectRoot, target)}`);
+      } else {
+        throw e;
+      }
     }
-    fs.writeFileSync(target, bundleSource, 'utf8');
-    console.log(`[OK] Generated bundle at: ${path.relative(projectRoot, target)} (${bundleSource.length} bytes)`);
   }
 
   // Also sync styles.css to extension and app ui folders
@@ -166,10 +174,14 @@ export function buildBundle() {
         }
       } catch (_) {}
     }
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    try {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(cssTarget, cssSource, 'utf8');
+    } catch (e) {
+      if (e.code !== 'EROFS' && e.code !== 'EACCES') throw e;
     }
-    fs.writeFileSync(cssTarget, cssSource, 'utf8');
   }
 
   return bundleSource;

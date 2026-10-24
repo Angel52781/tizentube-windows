@@ -112,6 +112,15 @@ export class ViewingExperience {
         duration: Math.floor(video.duration), updatedAt: now };
       this.getStorage()?.setItem(this.lastKey, JSON.stringify(state));
       this.lastSavedAt = now;
+      if (typeof window !== 'undefined' && window.chrome?.webview?.postMessage) {
+        window.chrome.webview.postMessage({
+          channel: 'viewing:last-video',
+          id: state.id,
+          position: state.position,
+          duration: state.duration,
+          updatedAt: state.updatedAt
+        });
+      }
     } catch (_) { /* Quota/privacy mode: fail without blocking playback */ }
   }
 
@@ -120,7 +129,12 @@ export class ViewingExperience {
   clearCompletedVideo() {
     const old = this.readLastVideo();
     if (old && old.id === this.getVideoId()) {
-      try { this.getStorage()?.removeItem(this.lastKey); } catch (_) {}
+      try {
+        this.getStorage()?.removeItem(this.lastKey);
+        if (typeof window !== 'undefined' && window.chrome?.webview?.postMessage) {
+          window.chrome.webview.postMessage({ channel: 'viewing:clear-last-video' });
+        }
+      } catch (_) {}
     }
   }
 
@@ -204,8 +218,9 @@ export class ViewingExperience {
       // trusted input protocol, after verifying that the state still differs.
       if (typeof window !== 'undefined' && window.chrome?.webview?.postMessage) {
         const now = Date.now();
+        const interval = this.nativeTheaterRestoreAttempts === 0 ? 0 : 2500;
         if (this.nativeTheaterRestoreAttempts < 5 &&
-            now - this.lastNativeTheaterRestoreAt > 3000) {
+            now - this.lastNativeTheaterRestoreAt >= interval) {
           this.lastNativeTheaterRestoreAt = now;
           this.nativeTheaterRestoreAttempts++;
           window.chrome.webview.postMessage({ channel: 'viewing:restore-theater', enabled: saved });

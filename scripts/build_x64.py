@@ -307,7 +307,21 @@ def package_distribution(root_dir):
 
     # 2. Copy application code and runtime assets
     app_target_dir = dist_dir / "app"
-    shutil.copytree(root_dir / "src", app_target_dir)
+    # The shared VPS can reject directory copystat/chmod even for owner-created
+    # dirs. Copy actual content, not source directory mode/timestamps. Never
+    # fall back to stale distribution binaries when a fresh build fails.
+    src_dir = root_dir / "src"
+    for source in sorted(src_dir.rglob("*")):
+        if source.is_symlink():
+            raise RuntimeError(f"Source tree must not contain symlinks: {source}")
+        target = app_target_dir / source.relative_to(src_dir)
+        if source.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+        elif source.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+        else:
+            raise RuntimeError(f"Unexpected source entry: {source}")
 
     # 3. Write Windows helper launchers
     launch_ps1 = dist_dir / "launch.ps1"

@@ -16,15 +16,18 @@ namespace TizenTubeWindows
         private readonly GlyphButton minimize;
         private readonly GlyphButton maximize;
         private readonly GlyphButton close;
+        private readonly GlyphButton restoreFloating;
         private readonly PictureBox appIcon;
         private readonly Label title;
         private readonly ToolTip tips = new ToolTip();
         private readonly Action dragWindow;
         private readonly Action toggleMaximize;
         private bool isMaximized;
+        private bool isFloatingMode;
 
         public NavigationToolbar(Icon icon, Action navigateBack, Action reloadPage,
-            Action drag, Action minimizeWindow, Action maximizeWindow, Action closeWindow)
+            Action drag, Action minimizeWindow, Action maximizeWindow, Action closeWindow,
+            Action restoreFloatingAction = null)
         {
             dragWindow = drag;
             toggleMaximize = maximizeWindow;
@@ -70,28 +73,38 @@ namespace TizenTubeWindows
                 Size = new Size(CaptionButtonWidth, ChromeHeight),
                 AccessibleName = "Cerrar"
             };
+            restoreFloating = new GlyphButton(GlyphButton.Kind.RestoreFloating) {
+                Size = new Size(34, 28),
+                AccessibleName = "Volver a la ventana principal",
+                Visible = false
+            };
+
             back.Click += (s, e) => navigateBack?.Invoke();
             reload.Click += (s, e) => reloadPage?.Invoke();
             minimize.Click += (s, e) => minimizeWindow?.Invoke();
             maximize.Click += (s, e) => maximizeWindow?.Invoke();
             close.Click += (s, e) => closeWindow?.Invoke();
+            restoreFloating.Click += (s, e) => restoreFloatingAction?.Invoke();
+
             tips.SetToolTip(back, "Atrás (Alt + ←)");
             tips.SetToolTip(reload, "Recargar (Ctrl + R)");
             tips.SetToolTip(minimize, "Minimizar");
             tips.SetToolTip(maximize, "Maximizar / Restaurar");
             tips.SetToolTip(close, "Cerrar");
+            tips.SetToolTip(restoreFloating, "Volver a la ventana normal (F9)");
 
             Controls.Add(appIcon);
             Controls.Add(back);
             Controls.Add(reload);
             Controls.Add(title);
+            Controls.Add(restoreFloating);
             Controls.Add(minimize);
             Controls.Add(maximize);
             Controls.Add(close);
             MouseDown += (s, e) => { if (e.Button == MouseButtons.Left && e.Clicks == 1) dragWindow?.Invoke(); };
             title.MouseDown += (s, e) => { if (e.Button == MouseButtons.Left && e.Clicks == 1) dragWindow?.Invoke(); };
-            title.DoubleClick += (s, e) => toggleMaximize?.Invoke();
-            DoubleClick += (s, e) => toggleMaximize?.Invoke();
+            title.DoubleClick += (s, e) => { if (!isFloatingMode) toggleMaximize?.Invoke(); };
+            DoubleClick += (s, e) => { if (!isFloatingMode) toggleMaximize?.Invoke(); };
             Resize += (s, e) => LayoutChildren();
             LayoutChildren();
             SetBackEnabled(false);
@@ -100,20 +113,77 @@ namespace TizenTubeWindows
         private void LayoutChildren()
         {
             int right = ClientSize.Width;
-            close.Location = new Point(right - CaptionButtonWidth, 0);
-            maximize.Location = new Point(right - CaptionButtonWidth * 2, 0);
-            minimize.Location = new Point(right - CaptionButtonWidth * 3, 0);
-            title.Width = Math.Max(0, right - CaptionButtonWidth * 3 - title.Left - 5);
+            if (isFloatingMode)
+            {
+                close.Size = new Size(34, ChromeHeight);
+                restoreFloating.Size = new Size(34, ChromeHeight);
+                minimize.Size = new Size(34, ChromeHeight);
+                close.Location = new Point(right - 34, 0);
+                restoreFloating.Location = new Point(right - 68, 0);
+                minimize.Location = new Point(right - 102, 0);
+                title.Width = Math.Max(0, right - 102 - title.Left - 4);
+            }
+            else
+            {
+                close.Size = new Size(CaptionButtonWidth, ChromeHeight);
+                maximize.Size = new Size(CaptionButtonWidth, ChromeHeight);
+                minimize.Size = new Size(CaptionButtonWidth, ChromeHeight);
+                close.Location = new Point(right - CaptionButtonWidth, 0);
+                maximize.Location = new Point(right - CaptionButtonWidth * 2, 0);
+                minimize.Location = new Point(right - CaptionButtonWidth * 3, 0);
+                title.Width = Math.Max(0, right - CaptionButtonWidth * 3 - title.Left - 5);
+            }
+        }
+
+        public void SetFloatingMode(bool floating)
+        {
+            isFloatingMode = floating;
+            SuspendLayout();
+            try
+            {
+                if (floating)
+                {
+                    back.Visible = false;
+                    reload.Visible = false;
+                    maximize.Visible = false;
+                    restoreFloating.Visible = true;
+                    appIcon.Location = new Point(6, 10);
+                    title.Location = new Point(28, 2);
+                    title.Height = 34;
+                    title.Font = new Font("Segoe UI", 9f);
+                }
+                else
+                {
+                    back.Visible = true;
+                    reload.Visible = true;
+                    maximize.Visible = true;
+                    restoreFloating.Visible = false;
+                    appIcon.Location = new Point(9, 10);
+                    title.Location = new Point(116, 2);
+                    title.Height = 34;
+                    title.Font = new Font("Segoe UI", 9f);
+                }
+                LayoutChildren();
+            }
+            finally
+            {
+                ResumeLayout(true);
+            }
         }
 
         public void SetBackEnabled(bool enabled) { back.Enabled = enabled; }
         public bool BackEnabled => back.Enabled;
         public bool IsMaximized => isMaximized;
+        public bool IsFloatingMode => isFloatingMode;
         public void SetTitle(string value)
         {
-            title.Text = string.IsNullOrWhiteSpace(value)
-                ? "TizenTube — YouTube"
-                : value.Length > 250 ? value.Substring(0, 250) : value;
+            if (string.IsNullOrWhiteSpace(value))
+                title.Text = isFloatingMode ? "TizenTube · Reproductor flotante" : "TizenTube — YouTube";
+            else
+            {
+                string clean = value.Length > 250 ? value.Substring(0, 250) : value;
+                title.Text = isFloatingMode ? clean : clean;
+            }
         }
         public void SetMaximized(bool value)
         {
@@ -132,6 +202,7 @@ namespace TizenTubeWindows
         }
         public void InvokeMaximizeForProbe() { maximize.PerformAction(); }
         public void InvokeMinimizeForProbe() { minimize.PerformAction(); }
+        public void InvokeRestoreFloatingForProbe() { restoreFloating.PerformAction(); }
 
         protected override void Dispose(bool disposing)
         {
@@ -145,7 +216,7 @@ namespace TizenTubeWindows
 
         private sealed class GlyphButton : Control
         {
-            internal enum Kind { Back, Reload, Minimize, Maximize, Close }
+            internal enum Kind { Back, Reload, Minimize, Maximize, Close, RestoreFloating }
             private readonly Kind kind;
             private bool hovered;
             internal bool IsRestoring { get; set; }
@@ -236,6 +307,12 @@ namespace TizenTubeWindows
                         case Kind.Close:
                             g.DrawLine(pen, -6, -6, 6, 6);
                             g.DrawLine(pen, 6, -6, -6, 6);
+                            break;
+                        case Kind.RestoreFloating:
+                            g.DrawRectangle(pen, -6, -5, 12, 10);
+                            g.DrawLine(pen, 0, 0, 4, -4);
+                            g.DrawLine(pen, 1, -4, 4, -4);
+                            g.DrawLine(pen, 4, -4, 4, -1);
                             break;
                     }
                 }
