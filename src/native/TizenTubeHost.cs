@@ -1561,7 +1561,6 @@ namespace TizenTubeWindows
                 Console.Error.WriteLine("[Host Cycle Probe] Error: " + ex.Message);
             }
         }
-        }
 
         private async Task CaptureTheaterProbeAsync()
         {
