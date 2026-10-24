@@ -185,9 +185,11 @@ try {
   globalThis.location.pathname = '/';
   globalThis.location.href = 'https://www.youtube.com/';
   const next = new ViewingExperience(null);
-  check(next.restoreLastVideoOnLaunch(), true, 'Last watched video restored on a fresh launch');
+  check(next.restoreLastVideoOnLaunch(), false, 'Fresh launch stays on YouTube homepage by default');
+  const optedIn = new ViewingExperience(null, { restoreOnLaunch: true });
+  check(optedIn.restoreLastVideoOnLaunch(), true, 'Explicit opt-in can resume a saved video');
   check(redirected, 'https://www.youtube.com/watch?v='+videoId+'&t=156s', 'Resume URL contains saved time');
-  check(next.restoreLastVideoOnLaunch(), false, 'At most one restoration per session');
+  check(optedIn.restoreLastVideoOnLaunch(), false, 'At most one restoration per session');
   check(session.get('tizentube.launchRestoreAttempted'), '1', 'Resume guard set');
   next.dispose();
   local.set(ui.lastKey, JSON.stringify({id:videoId,position:180, duration:1800,updatedAt:Date.now()-100*86400000}));
