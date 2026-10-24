@@ -1,10 +1,10 @@
-# TizenTube Windows — prueba personal (v0.1.0-preview.9)
+# TizenTube Windows — prueba personal (v0.1.0-preview.10)
 
 Este es un **prototipo de escritorio no oficial**, todavía en pruebas. Abre YouTube mediante Microsoft Edge WebView2 en una ventana propia; **no reproduce exactamente la interfaz de la aplicación Android/Chromecast**. La integración real de bloqueo de anuncios, SponsorBlock y DeArrow puede presentar fallos por cambios de YouTube. No se garantiza su funcionamiento en todos los vídeos.
 
 ## Instalación en Windows 10/11 (x64)
 
-1. Descarga `TizenTube-Windows-x64-v0.1.0-preview.9.zip` desde la sección **Assets** de la release de GitHub.
+1. Descarga `TizenTube-Windows-x64-v0.1.0-preview.10.zip` desde la sección **Assets** de la release de GitHub.
 2. Haz clic derecho en el ZIP y elige **Extraer todo**. Es importante extraerlo: no ejecutes el `.exe` directamente dentro del ZIP.
 3. Abre la carpeta `TizenTube-Windows-x64` y haz doble clic en **`TizenTubeHost.exe`**. Es el programa real, compilado en Windows con .NET 8 y WebView2. Desde preview.6 lleva AdBlock, SponsorBlock, DeArrow y el CSS dentro del propio EXE; incluso funciona sin `app`.
 4. Si Windows SmartScreen avisa que la aplicación no tiene un editor reconocido, se debe a que este prototipo no está firmado digitalmente. Ejecuta únicamente el ZIP descargado de la release oficial del repositorio del proyecto y verifica el SHA-256 publicado antes de decidir si confiar en el archivo.

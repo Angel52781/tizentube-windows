@@ -36,6 +36,7 @@ namespace TizenTubeWindows
         public bool WindowCycleTest { get; set; } = false;
         public bool FloatingWindowTest { get; set; } = false;
         public bool WindowPlacementTest { get; set; } = false;
+        public bool FloatingHotKeyTest { get; set; } = false;
 
         public static HostOptions Parse(string[] args)
         {
@@ -108,6 +109,10 @@ namespace TizenTubeWindows
                 {
                     options.WindowPlacementTest = true;
                 }
+                else if (arg == "--floating-hotkey-test")
+                {
+                    options.FloatingHotKeyTest = true;
+                }
                 else if (arg == "--help" || arg == "-h")
                 {
                     options.ShowHelp = true;
@@ -177,6 +182,19 @@ namespace TizenTubeWindows
     {
         [DllImport("psapi.dll")]
         private static extern bool EmptyWorkingSet(IntPtr hProcess);
+
+        // Register only while TizenTube has focus: Chromium handles
+        // Ctrl+Shift+P as Print before WinForms KeyDown/ProcessCmdKey fires.
+        // WM_HOTKEY is delivered by Windows before WebView2 can print.
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint virtualKey);
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool UnregisterHotKey(IntPtr window, int id);
+        private const int WmHotKey = 0x0312;
+        private const int FloatingHotKeyId = 0x54A1;
+        private const uint ModControlShiftNoRepeat = 0x4000 | 0x0002 | 0x0004;
+        private bool floatingHotKeyRegistered = false;
+        private long floatingHotKeyWindowsTriggered = 0;
 
         private readonly HostOptions options;
         private WebView2 webView;
@@ -263,6 +281,8 @@ namespace TizenTubeWindows
             this.ResizeEnd += (s, e) => RememberWindowPlacement();
             this.Move += (s, e) => RememberWindowPlacement();
             this.Resize += (s, e) => RememberWindowPlacement();
+            this.Activated += (s, e) => EnableFocusedFloatingHotkey();
+            this.Deactivate += (s, e) => DisableFocusedFloatingHotkey();
 
             InitializeWebView();
             SetupMemoryTrimming();
@@ -318,6 +338,22 @@ namespace TizenTubeWindows
                         RememberWindowPlacement();
                     }
                 });
+            }
+            if (this.options.FloatingHotKeyTest && !this.options.HeadlessMode)
+            {
+                this.Shown += async (sender, evt) => {
+                    await Task.Delay(3000);
+                    if (IsDisposed) return;
+                    Activate();
+                    // This sends the SAME keyboard combination as the user.
+                    // The test must fail if Windows/WebView2 does not deliver
+                    // WM_HOTKEY, rather than merely detecting a loaded UI.
+                    SendKeys.SendWait("^+p");
+                    await Task.Delay(900);
+                    bool reached = Interlocked.Read(ref floatingHotKeyWindowsTriggered) > 0;
+                    if (!reached) ExitCode = 5;
+                    Console.WriteLine($"[Host Hotkey Test] windowsHotkey={reached}");
+                };
             }
 
             if (this.options.FloatingWindowTest && !this.options.HeadlessMode)
@@ -452,6 +488,33 @@ namespace TizenTubeWindows
                     e.KeyCode == Keys.ControlKey || e.KeyCode == Keys.ShiftKey)
                     floatingAcceleratorDown = false;
             };
+        }
+
+        private void EnableFocusedFloatingHotkey()
+        {
+            if (floatingHotKeyRegistered || !IsHandleCreated || options.HeadlessMode) return;
+            floatingHotKeyRegistered = RegisterHotKey(Handle, FloatingHotKeyId,
+                ModControlShiftNoRepeat, (uint)Keys.P);
+            if (!floatingHotKeyRegistered)
+                Debug.WriteLine("Windows Ctrl+Shift+P hotkey unavailable; use F9 or the PiP button.");
+        }
+
+        private void DisableFocusedFloatingHotkey()
+        {
+            if (!floatingHotKeyRegistered || !IsHandleCreated) return;
+            UnregisterHotKey(Handle, FloatingHotKeyId);
+            floatingHotKeyRegistered = false;
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WmHotKey && m.WParam.ToInt32() == FloatingHotKeyId)
+            {
+                Interlocked.Increment(ref floatingHotKeyWindowsTriggered);
+                _ = ToggleFloatingWindowAsync();
+                return;
+            }
+            base.WndProc(ref m);
         }
 
         private void RememberWindowPlacement()
@@ -1052,6 +1115,7 @@ html.tt-floating-mode .ytp-chrome-bottom { bottom: 0 !important; }
             sb.AppendLine($"    \"windowRestorePass\": {Interlocked.Read(ref windowRestorePass)},");
             sb.AppendLine($"    \"windowPlacementRestored\": {Interlocked.Read(ref windowPlacementRestored)},");
             sb.AppendLine($"    \"floatingAcceleratorHandled\": {Interlocked.Read(ref floatingAcceleratorHandled)},");
+            sb.AppendLine($"    \"floatingHotKeyWindowsTriggered\": {Interlocked.Read(ref floatingHotKeyWindowsTriggered)},");
             sb.AppendLine($"    \"floatingWindowCyclePass\": {Interlocked.Read(ref floatingWindowCyclePass)},");
             sb.AppendLine($"    \"sponsorBlockSkipCount\": {Interlocked.Read(ref sponsorBlockSkipCount)}");
             sb.AppendLine("  },");
@@ -1141,6 +1205,7 @@ html.tt-floating-mode .ytp-chrome-bottom { bottom: 0 !important; }
                 _ = ToggleFloatingWindowAsync(true); // X restores the regular app, does not stop video.
                 return;
             }
+            DisableFocusedFloatingHotkey();
             // Do not persist a miniature window, immersive bounds or minimized
             // state on shutdown. Only the last normal/restorable geometry.
             if (!nativeFloatingActive && !nativeImmersiveActive) SaveWindowPlacement();

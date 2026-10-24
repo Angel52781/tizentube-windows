@@ -231,6 +231,16 @@ jobs:
           if ($secondSummary.windowPlacementRestored -ne 1) { throw 'WINDOW_PLACEMENT_NOT_RESTORED_AFTER_RESTART' }
           Copy-Item $secondPlacementEvidence 'release-out/window-placement-restart-evidence.json' -Force
           Remove-Item Env:TIZENTUBE_TEST_PLACEMENT_DIR
+          # Regression reported on physical Windows: Ctrl+Shift+P launched
+          # Edge WebView2 Print despite passing purely structural CI. Send the
+          # actual keyboard chord and require WM_HOTKEY evidence on Windows.
+          $keyEvidence = Join-Path (Resolve-Path $pkg).Path 'floating-hotkey-evidence.json'
+          $keyTest = Start-Process -FilePath (Resolve-Path $exe).Path -WorkingDirectory (Resolve-Path $pkg).Path -ArgumentList @('--smoke-test','12','--floating-hotkey-test','--telemetry-file',$keyEvidence) -PassThru -Wait
+          if ($keyTest.ExitCode -ne 0 -or !(Test-Path $keyEvidence)) { throw 'FLOATING_HOTKEY_KEYBOARD_E2E_FAILED' }
+          $keySummary = (Get-Content $keyEvidence -Raw -Encoding utf8 | ConvertFrom-Json).summary
+          if ($keySummary.floatingHotKeyWindowsTriggered -lt 1) { throw 'FLOATING_HOTKEY_NOT_RECEIVED_BY_WINDOWS' }
+          Copy-Item $keyEvidence 'release-out/floating-hotkey-evidence.json' -Force
+          Remove-Item $keyEvidence -Force
           # Research-only probe. WebView2 != Cobalt; an exit code 0 is not
           # proof that YouTube TV works or ad-free playback is available.
           $tvProbe = Join-Path (Resolve-Path $pkg).Path 'experimental-tv-smoke.json'
@@ -246,7 +256,7 @@ jobs:
           $exeSha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "TizenTubeHost.exe SHA256=$exeSha" | Set-Content (Join-Path $pkg 'CHECKSUMS.txt')
           "Commit=$env:GITHUB_SHA" | Add-Content (Join-Path $pkg 'CHECKSUMS.txt')
-          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.9.zip'
+          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.10.zip'
           Compress-Archive -Path $pkg -DestinationPath $zip -CompressionLevel Optimal -Force
           if (!(Test-Path $zip)) { throw 'PORTABLE_ZIP_MISSING' }
           $zipSha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -260,12 +270,13 @@ jobs:
         with:
           name: tizentube-windows-x64-portable-preview
           path: |
-            release-out/TizenTube-Windows-x64-v0.1.0-preview.9.zip
+            release-out/TizenTube-Windows-x64-v0.1.0-preview.10.zip
             release-out/SHA256SUMS.txt
             release-out/portable-smoke-evidence.json
             release-out/standalone-exe-smoke-evidence.json
             release-out/floating-window-cycle-evidence.json
             release-out/window-placement-restart-evidence.json
+            release-out/floating-hotkey-evidence.json
             release-out/window-cycle-evidence.json
             release-out/experimental-tv-smoke-evidence.json
           if-no-files-found: error

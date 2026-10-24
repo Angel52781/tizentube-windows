@@ -1,4 +1,8 @@
-# Experiencia de reproducción — v0.1.0-preview.9
+# Experiencia de reproducción — v0.1.0-preview.10
+
+## Reparación del atajo en el sistema operativo (preview.10)
+
+La prueba en el Windows físico del usuario demostró que `WebView2.KeyDown` **no recibe Ctrl+Shift+P antes que el diálogo de impresión**; la medición devolvió `floatingAcceleratorHandled=0` y apareció la ventana «Impresión de Windows». El test anterior solo verificaba las dimensiones del PiP, no la pulsación de tecla. En preview.10 se registra `Ctrl+Shift+P` con `RegisterHotKey`/`WM_HOTKEY` de Win32 mientras la aplicación es la ventana activa. Se libera al desactivar/cerrar TizenTube para evitar capturar combinaciones en otras aplicaciones. Se incluye un escenario en Windows CI que envía la tecla real y exige `floatingHotKeyWindowsTriggered >= 1` antes de permitir publicar.
 
 ## Reparación tras reproducción física (preview.9)
 
