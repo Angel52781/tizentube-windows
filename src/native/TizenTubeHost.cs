@@ -850,14 +850,24 @@ namespace TizenTubeWindows
                 string before = await webView.CoreWebView2.ExecuteScriptAsync(
                     "window.__ttFloating?.diagnostics() || null");
                 File.WriteAllText(Path.Combine(folder, "floating-before.json"), before);
-                await ToggleFloatingWindowAsync();
+                // Exercise the actual button -> JS -> IPC -> native path,
+                // rather than passing CI by directly resizing WinForms.
+                string buttonClick = await webView.CoreWebView2.ExecuteScriptAsync(
+                    "(() => {const b=document.getElementById('tizentube-native-pip');" +
+                    "const v=document.querySelector('video.html5-main-video');" +
+                    "if(!b||!v||v.readyState<2||v.videoWidth<1)return false;" +
+                    "b.click();return true;})()");
+                File.WriteAllText(Path.Combine(folder, "floating-button-click.json"), buttonClick);
                 await Task.Delay(2300);
                 string after = await webView.CoreWebView2.ExecuteScriptAsync(
                     "window.__ttFloating?.diagnostics() || null");
                 File.WriteAllText(Path.Combine(folder, "floating-after.json"), after);
-                using (var stream = File.Create(Path.Combine(folder, "floating-preview.png")))
-                    await webView.CoreWebView2.CapturePreviewAsync(
-                        CoreWebView2CapturePreviewImageFormat.Png, stream);
+                if (nativeFloatingActive)
+                {
+                    using (var stream = File.Create(Path.Combine(folder, "floating-preview.png")))
+                        await webView.CoreWebView2.CapturePreviewAsync(
+                            CoreWebView2CapturePreviewImageFormat.Png, stream);
+                }
                 Console.WriteLine("[Host PiP] Local screenshot and media layout probe saved");
                 await ToggleFloatingWindowAsync(true);
             }
