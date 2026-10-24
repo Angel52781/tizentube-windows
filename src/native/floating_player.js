@@ -70,6 +70,8 @@ html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-chrome-bottom
       viewport: { width: window.innerWidth, height: window.innerHeight },
       playerInBody: document.querySelector('#movie_player')?.parentElement === document.body,
       theater: theater ? theater.hasAttribute('theater') : null,
+      fullscreen: !!document.fullscreenElement,
+      youtubeFullscreen: !!document.querySelector('.ytp-fullscreen'),
       theaterPreference: typeof window.__TT_THEATER_PREF === 'boolean'
         ? window.__TT_THEATER_PREF : null,
       pipButtonVisible: !!pip && pip.getBoundingClientRect().width > 0,

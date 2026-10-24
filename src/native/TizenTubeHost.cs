@@ -946,70 +946,26 @@ namespace TizenTubeWindows
                 (DateTime.UtcNow - lastTheaterRestoreAttemptUtc).TotalMilliseconds < 2600) return;
             lastTheaterRestoreAttemptUtc = DateTime.UtcNow;
             theaterRestoreInProgress = true;
-            bool suppressionSet = false;
             try
             {
-                string state = await webView.CoreWebView2.ExecuteScriptAsync(
-                    "(() => { const b=document.querySelector('.ytp-size-button'); " +
-                    "const flexy=document.querySelector('ytd-watch-flexy'); " +
-                    "if (!b || !flexy || location.pathname !== '/watch') return null; " +
-                    "const r=b.getBoundingClientRect(); return {theater:flexy.hasAttribute('theater')," +
-                    "x:r.left+r.width/2,y:r.top+r.height/2,width:r.width,height:r.height}; })()");
-                if (state == "null") return;
-                using (var data = System.Text.Json.JsonDocument.Parse(state))
-                {
-                    var obj = data.RootElement;
-                    if (obj.GetProperty("theater").GetBoolean() == wanted) return;
-                    double x = obj.GetProperty("x").GetDouble();
-                    double y = obj.GetProperty("y").GetDouble();
-                    if (x < 0 || y < 0 || obj.GetProperty("width").GetDouble() < 5 ||
-                        obj.GetProperty("height").GetDouble() < 5 ||
-                        x >= webView.Width || y >= webView.Height) return;
-                    // Click the EXISTING YouTube size button rather than
-                    // changing CSS/attributes behind YouTube's state machine.
-                    string press = System.Text.Json.JsonSerializer.Serialize(new {
-                        type = "mousePressed", x, y, button = "left", clickCount = 1 });
-                    string release = System.Text.Json.JsonSerializer.Serialize(new {
-                        type = "mouseReleased", x, y, button = "left", clickCount = 1 });
-                    // CDP mouse input is a trusted DOM click. Mark this one
-                    // as an AUTOMATIC restore before dispatching, otherwise
-                    // ViewingExperience mistakes it for a new user choice and
-                    // may overwrite the persisted preference with false as
-                    // YouTube hydrates asynchronously (verified on PC).
-                    await webView.CoreWebView2.ExecuteScriptAsync(
-                        "window.__TT_RESTORING_THEATER = true");
-                    suppressionSet = true;
-                    await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
-                        "Input.dispatchMouseEvent", press);
-                    await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
-                        "Input.dispatchMouseEvent", release);
-                    await Task.Delay(520);
-                    // YouTube occasionally ignores its own size-button
-                    // handler during initial player hydration. Reconcile the
-                    // actual ytd-watch-flexy presentation as a fallback. This
-                    // affects ONLY the saved layout, never playback state.
-                    string reconcileScript = "(() => { const f=document.querySelector('ytd-watch-flexy');" +
-                        "if (!f || location.pathname !== '/watch') return false; " +
-                        "const wanted=" + (wanted ? "true" : "false") + ";" +
-                        "if (f.hasAttribute('theater') !== wanted) {" +
-                        " f.toggleAttribute('theater',wanted);" +
-                        " window.dispatchEvent(new Event('resize'));" +
-                        "} return f.hasAttribute('theater') === wanted; })()";
-                    await webView.CoreWebView2.ExecuteScriptAsync(reconcileScript);
-                    Interlocked.Increment(ref nativeTheaterRestored);
-                }
+                // Never synthesize a mouse click on YouTube's video controls:
+                // the physical Windows test revealed that CDP hit-testing can
+                // trigger FULLSCREEN rather than THEATER while the player is
+                // hydrating. Restore only the watch-layout DOM state.
+                string reconcileScript = "(() => { const f=document.querySelector('ytd-watch-flexy');" +
+                    "if (!f || location.pathname !== '/watch' || document.fullscreenElement) return false;" +
+                    "const wanted=" + (wanted ? "true" : "false") + ";" +
+                    "if (f.hasAttribute('theater') !== wanted) {" +
+                    " window.__TT_RESTORING_THEATER=true;" +
+                    " f.toggleAttribute('theater',wanted);" +
+                    " window.dispatchEvent(new Event('resize'));" +
+                    " window.__TT_RESTORING_THEATER=false;" +
+                    "} return f.hasAttribute('theater') === wanted; })()";
+                string applied = await webView.CoreWebView2.ExecuteScriptAsync(reconcileScript);
+                if (applied == "true") Interlocked.Increment(ref nativeTheaterRestored);
             }
             catch (Exception ex) { Debug.WriteLine("[Host Theater Restore] " + ex.Message); }
-            finally
-            {
-                if (suppressionSet && webView?.CoreWebView2 != null)
-                {
-                    try { await webView.CoreWebView2.ExecuteScriptAsync(
-                        "window.__TT_RESTORING_THEATER = false"); }
-                    catch { /* A navigation destroys the old document anyway. */ }
-                }
-                theaterRestoreInProgress = false;
-            }
+            finally { theaterRestoreInProgress = false; }
         }
 
         private async Task ToggleFloatingWindowAsync(bool restore = false)
