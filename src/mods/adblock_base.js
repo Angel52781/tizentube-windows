@@ -187,6 +187,11 @@ export class AdBlockBase {
     const isTvPayload = Boolean(obj.contents?.tvBrowseRenderer)
       || (typeof location !== 'undefined' && /^\/tv(?:\/|$)/.test(location.pathname || ''));
 
+    // Desktop player responses carry the streaming contract. Removing ad
+    // properties here can invalidate playback on accounts/regions not used
+    // by CI. Fail open on the player; feed cosmetics remain independently on.
+    if (!isTvPayload && (obj.streamingData || obj.playabilityStatus)) return;
+
     if (obj.adPlacements) {
       if (isTvPayload) obj.adPlacements = [];
       else delete obj.adPlacements;
