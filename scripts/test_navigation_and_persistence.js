@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-/** Regression for real masthead Back and native-authoritative restart prefs. */
+/** Regression for native browser toolbar and authoritative restart prefs. */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import vm from 'node:vm';
 import { AppUI } from '../src/ui/app_ui.js';
 
 const store = new Map();
@@ -35,46 +34,22 @@ try {
   assert.equal(applied[0].restored.ui.highContrast, true,
     'offline/localStorage-only mode still loads the last valid settings');
 
-  let backCount = 0;
-  const nodes = new Map();
-  function node(id) {
-    const handlers = {};
-    const obj = {
-      id, handlers, isConnected: true, parentElement: null, firstChild: null,
-      nextSibling: null, setAttribute() {}, appendChild(child) { child.parentElement = this; },
-      addEventListener(name, cb) { handlers[name] = cb; },
-      querySelector(name) { return name === '#guide-button' ? guide : null; },
-      insertBefore(child) { child.parentElement = this; nodes.set(child.id, child); },
-      remove() { nodes.delete(this.id); }
-    };
-    return obj;
-  }
-  const masthead = node('start');
-  const guide = node('guide-button');
-  const listeners = new Map();
-  const document = {
-    body: {}, querySelector: s => s === 'ytd-masthead #start' ? masthead : null,
-    getElementById: id => nodes.get(id) ?? null,
-    createElement: id => node(id), createElementNS: (ns,id) => node(id)
-  };
-  const history = { length: 2, back() { backCount++; } };
-  const window = { history, addEventListener: (e, fn) => listeners.set(e, fn),
-    removeEventListener: e => listeners.delete(e) };
-  const context = { window, document, setInterval: () => 12, clearInterval() {},
-    setTimeout: fn => { fn(); return 1; }, MutationObserver: class {
-      observe() {} disconnect() {}
-    } };
-  vm.runInNewContext(readFileSync(new URL('../src/native/navigation_controls.js', import.meta.url), 'utf8'), context);
-  const back = document.getElementById('tizentube-masthead-back');
-  assert.ok(back, 'Back control appears in the real YouTube masthead');
-  assert.equal(back.parentElement, masthead);
-  assert.equal(typeof back.handlers.click, 'function');
-  back.handlers.click({ preventDefault() {}, stopPropagation() {} });
-  assert.equal(backCount, 1, 'button navigates browser SPA history (not YouTube Home)');
-  window.__ttNavigationControls.stop();
-  assert.equal(document.getElementById('tizentube-masthead-back'), null,
-    'control can be removed cleanly on document unload');
-  console.log('All 9/9 native preferences and YouTube masthead Back tests PASSED.');
+  const host = readFileSync(new URL('../src/native/TizenTubeHost.cs', import.meta.url), 'utf8');
+  const toolbar = readFileSync(new URL('../src/native/NavigationToolbar.cs', import.meta.url), 'utf8');
+  const project = readFileSync(new URL('../src/native/TizenTubeWindows.csproj', import.meta.url), 'utf8');
+  assert.ok(host.includes('SetupNavigationToolbar()'), 'Host creates native toolbar');
+  assert.ok(host.includes('CoreWebView2.GoBack()'), 'Back invokes native WebView2 history');
+  assert.ok(host.includes('CoreWebView2?.Reload()'), 'Reload invokes native WebView2 reload');
+  assert.ok(host.includes('CoreWebView2.HistoryChanged'), 'Back enablement responds to SPA navigation');
+  assert.ok(host.includes('UpdateNavigationToolbarVisibility()'), 'Fullscreen/PiP preserve unobstructed video');
+  assert.ok(toolbar.includes('Atrás (Alt + ←)') && toolbar.includes('Recargar (Ctrl + R)'),
+    'Native control tooltips identify browser actions');
+  assert.ok(toolbar.includes('SetBackEnabled(false)'), 'Back starts disabled without history');
+  assert.ok(!host.includes('ReadEmbeddedRequired("TizenTube.NavigationControls")'),
+    'YouTube masthead back overlay is no longer injected');
+  assert.ok(!project.includes('TizenTube.NavigationControls'),
+    'Native package cannot embed obsolete masthead overlay');
+  console.log('PASS persisted preferences and native Back/Reload toolbar wiring (Windows E2E validates actual click).');
 } finally {
   if (originalStorage === undefined) delete globalThis.localStorage;
   else globalThis.localStorage = originalStorage;
