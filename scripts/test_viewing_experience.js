@@ -18,7 +18,12 @@ const player = { currentTime: 123, duration: 1800, requestPictureInPicture() {
   return Promise.resolve();
 }};
 const flexy = { theater: false, hasAttribute(k) { return k === 'theater' && this.theater; } };
-const theaterButton = { click() { flexy.theater = !flexy.theater; theaterClicks++; } };
+const theaterHandlers = new Map();
+const theaterButton = {
+  addEventListener(k,fn) { theaterHandlers.set(k,fn); },
+  removeEventListener(k,fn) { if (theaterHandlers.get(k) === fn) theaterHandlers.delete(k); },
+  click() { flexy.theater = !flexy.theater; theaterClicks++; theaterHandlers.get('click')?.(); }
+};
 const rightControls = { children: [], insertBefore(child) { this.children.push(child); domElements.set(child.id, child); },
   querySelector() { return { id: 'settings' }; } };
 const domElements = new Map();
@@ -92,7 +97,7 @@ try {
   const click = button.handlers.get('click');
   click({ stopPropagation() {} });
   check(nativePipRequests, 1, 'Click invokes HTMLVideoElement.requestPictureInPicture');
-  check(button.title, 'Reproductor flotante · Ctrl+Mayús+P', 'User can identify the floating player shortcut');
+  check(button.title, 'Reproductor flotante · F9 (o Ctrl+Mayús+P)', 'User can identify the shortcut');
   check(ui.mountPipControl(), true, 'Existing PiP control reused');
   check(rightControls.children.length, 1, 'Repeated mounting does not duplicate floating buttons');
 
@@ -109,13 +114,28 @@ try {
 
   ui.mount();
   check(events.has('pagehide'), true, 'Crash/close resume checkpoint on pagehide');
-  check(events.has('keydown'), true, 'Floating window shortcut registered');
-  events.get('keydown')({ ctrlKey: true, shiftKey: true, code: 'KeyP', repeat: false, preventDefault() {} });
-  check(hostMessages.length, 3, 'Ctrl Shift P triggers native floating action');
+  check(events.has('keydown'), false, 'Browser-level print accelerator is not intercepted in page JS');
   check(playback.listeners.has('timeupdate'), true, 'Progress listener connected');
+
+  // Regression: first ever selection of theater mode must persist even when
+  // yt-navigate-start previously set isNavigating=true. Old code returned
+  // before clearing the flag and ignored every user theater change.
+  local.delete(ui.theaterKey);
+  flexy.theater = false;
+  ui.isNavigating = true;
+  check(ui.syncTheaterMode(), true, 'Theater observer attaches without existing saved preference');
+  check(ui.isNavigating, false, 'First-time preference clears navigation suppression');
+  await Promise.resolve(); // finish microtask used to suppress our own restoration click
+  theaterButton.click();
+  await new Promise(resolve => setTimeout(resolve, 230));
+  check(local.get(ui.theaterKey), 'true', 'First user theater click saved after actual DOM update');
+  theaterButton.click();
+  await new Promise(resolve => setTimeout(resolve, 230));
+  check(local.get(ui.theaterKey), 'false', 'User switching back persists default player view');
+  check(theaterHandlers.has('click'), true, 'Theater listener remains connected while mounted');
   ui.dispose();
   check(events.has('pagehide'), false, 'Window listeners detached on dispose');
-  check(events.has('keydown'), false, 'Floating shortcut is removed on dispose');
+  check(theaterHandlers.has('click'), false, 'Theater listener cleaned up on dispose');
   check(playback.listeners.has('timeupdate'), false, 'Playback listener detached on dispose');
 
   // New launch on home (no automatic redirect on normal SPA home visits).

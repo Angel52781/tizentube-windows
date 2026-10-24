@@ -1,4 +1,12 @@
-# Experiencia de reproducción — v0.1.0-preview.8
+# Experiencia de reproducción — v0.1.0-preview.9
+
+## Reparación tras reproducción física (preview.9)
+
+El usuario reprodujo dos fallos reales de preview.8: `Ctrl+Shift+P` abría el diálogo de impresión de WebView2 y la primera selección del modo cine no persistía tras reiniciar. El modo cine fallaba porque `syncTheaterMode()` retornaba cuando la preferencia aún era `null`, dejando `isNavigating=true` y bloqueando el observador. Ahora se restablece el seguimiento y se escucha la selección manual sobre el botón original, sin regrabar el estado durante restauraciones automáticas. Se añadieron regresiones para cambiar a cine y volver al modo normal.
+
+La ventana se restaura con un estado **independiente de Google/YouTube** en `%LOCALAPPDATA%/TizenTube/window-placement.json`: tamaño, posición y maximización normales. Se excluyen estados minimizados, flotantes y pantalla completa. CI valida la persistencia con dos arranques independientes del host. El archivo no contiene credenciales.
+
+Los atajos `Ctrl+Shift+P` y `F9` ahora se procesan en el control WinForms de WebView2 antes de su comportamiento de impresión, sin depender de `keydown` dentro de YouTube. El botón de reproductor flotante sigue disponible. La comprobación visual del diálogo de impresión debe hacerse sobre un vídeo real.
 
 ## Reproductor flotante nativo (nuevo en preview.8)
 

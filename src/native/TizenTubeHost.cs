@@ -35,6 +35,7 @@ namespace TizenTubeWindows
         public bool TvMode { get; set; } = false;
         public bool WindowCycleTest { get; set; } = false;
         public bool FloatingWindowTest { get; set; } = false;
+        public bool WindowPlacementTest { get; set; } = false;
 
         public static HostOptions Parse(string[] args)
         {
@@ -102,6 +103,10 @@ namespace TizenTubeWindows
                 else if (arg == "--floating-window-test")
                 {
                     options.FloatingWindowTest = true;
+                }
+                else if (arg == "--window-placement-test")
+                {
+                    options.WindowPlacementTest = true;
                 }
                 else if (arg == "--help" || arg == "-h")
                 {
@@ -204,6 +209,12 @@ namespace TizenTubeWindows
         private Size minimumBeforeFloating;
         private bool topMostBeforeFloating;
         private long floatingWindowCyclePass = 0;
+        private long floatingAcceleratorHandled = 0;
+        private bool floatingAcceleratorDown = false;
+        private string windowPlacementFile;
+        private Rectangle lastNormalBounds;
+        private bool lastWindowWasMaximized;
+        private long windowPlacementRestored = 0;
         private DateTime startTimeUtc = DateTime.UtcNow;
 
         public int ExitCode { get; private set; } = 0;
@@ -236,6 +247,22 @@ namespace TizenTubeWindows
                 "TizenTube", this.options.TvMode ? "TVUserData" : "UserData"
             );
             Directory.CreateDirectory(appDataDir);
+            // Window layout is independent of WebView2's Google login data.
+            windowPlacementFile = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "TizenTube", this.options.TvMode ? "tv-window-placement.json" : "window-placement.json");
+            if (this.options.WindowPlacementTest &&
+                !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TIZENTUBE_TEST_PLACEMENT_DIR")))
+            {
+                string isolated = Environment.GetEnvironmentVariable("TIZENTUBE_TEST_PLACEMENT_DIR");
+                Directory.CreateDirectory(isolated);
+                windowPlacementFile = Path.Combine(isolated, "window-placement.json");
+            }
+            RestoreWindowPlacement();
+
+            this.ResizeEnd += (s, e) => RememberWindowPlacement();
+            this.Move += (s, e) => RememberWindowPlacement();
+            this.Resize += (s, e) => RememberWindowPlacement();
 
             InitializeWebView();
             SetupMemoryTrimming();
@@ -276,6 +303,20 @@ namespace TizenTubeWindows
                     if (fullscreenCoversScreen && restored) Interlocked.Exchange(ref windowCyclePass, 1);
                     else this.ExitCode = 3;
                     Console.WriteLine($"[Host Immersive Test] screen={fullscreenCoversScreen} restore={restored}");
+                });
+            }
+            if (this.options.WindowPlacementTest && !this.options.HeadlessMode)
+            {
+                this.Shown += (sender, evt) => BeginInvoke((MethodInvoker)delegate {
+                    if (Interlocked.Read(ref windowPlacementRestored) == 0)
+                    {
+                        WindowState = FormWindowState.Normal;
+                        var monitor = Screen.FromControl(this).WorkingArea;
+                        Bounds = new Rectangle(monitor.X + 40, monitor.Y + 40, 900, 560);
+                        RememberWindowPlacement();
+                        WindowState = FormWindowState.Maximized;
+                        RememberWindowPlacement();
+                    }
                 });
             }
 
@@ -329,6 +370,7 @@ namespace TizenTubeWindows
                 await webView.EnsureCoreWebView2Async(env);
 
                 ConfigureWebViewSettings();
+                SetupFloatingAccelerators();
                 SetupLifecycleDiagnostics();
                 SetupNetworkAdBlocker();
                 SetupFullscreenHandling();
@@ -385,6 +427,88 @@ namespace TizenTubeWindows
             settings.AreDevToolsEnabled = false; // Disabled by default in production to save RAM
             settings.IsStatusBarEnabled = false;
             settings.IsZoomControlEnabled = false;
+        }
+
+        private void SetupFloatingAccelerators()
+        {
+            // WebView2.WinForms exposes browser accelerator keys through the
+            // WinForms control KeyDown (not a public CoreWebView2Controller).
+            // Handled prevents Chromium's Ctrl+Shift+P printing action.
+            webView.KeyDown += (sender, e) =>
+            {
+                bool shortcut = e.KeyCode == Keys.P && e.Control && e.Shift;
+                bool f9 = e.KeyCode == Keys.F9;
+                if (!shortcut && !f9) return;
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                if (floatingAcceleratorDown) return;
+                floatingAcceleratorDown = true;
+                Interlocked.Increment(ref floatingAcceleratorHandled);
+                if (IsHandleCreated && !IsDisposed)
+                    BeginInvoke((MethodInvoker)delegate { _ = ToggleFloatingWindowAsync(); });
+            };
+            webView.KeyUp += (sender, e) => {
+                if (e.KeyCode == Keys.P || e.KeyCode == Keys.F9 ||
+                    e.KeyCode == Keys.ControlKey || e.KeyCode == Keys.ShiftKey)
+                    floatingAcceleratorDown = false;
+            };
+        }
+
+        private void RememberWindowPlacement()
+        {
+            if (nativeFloatingActive || nativeImmersiveActive || options.HeadlessMode ||
+                !IsHandleCreated || WindowState == FormWindowState.Minimized) return;
+            if (WindowState == FormWindowState.Normal && Bounds.Width >= 800 && Bounds.Height >= 500)
+                lastNormalBounds = Bounds;
+            lastWindowWasMaximized = WindowState == FormWindowState.Maximized;
+        }
+
+        private void RestoreWindowPlacement()
+        {
+            try
+            {
+                if (!File.Exists(windowPlacementFile)) return;
+                using (var json = System.Text.Json.JsonDocument.Parse(File.ReadAllText(windowPlacementFile)))
+                {
+                    var root = json.RootElement;
+                    var placement = new Rectangle(root.GetProperty("x").GetInt32(),
+                        root.GetProperty("y").GetInt32(), root.GetProperty("width").GetInt32(),
+                        root.GetProperty("height").GetInt32());
+                    if (placement.Width < 800 || placement.Height < 500 ||
+                        placement.Width > 10000 || placement.Height > 10000 ||
+                        !Array.Exists(Screen.AllScreens, s => s.WorkingArea.IntersectsWith(placement)))
+                        return; // Detached monitor: keep safe, centered defaults.
+                    StartPosition = FormStartPosition.Manual;
+                    Bounds = placement;
+                    lastNormalBounds = placement;
+                    if (root.GetProperty("maximized").GetBoolean())
+                    {
+                        WindowState = FormWindowState.Maximized;
+                        lastWindowWasMaximized = true;
+                    }
+                    Interlocked.Exchange(ref windowPlacementRestored, 1);
+                }
+            }
+            catch (Exception e) { Debug.WriteLine("Window placement restore: " + e.Message); }
+        }
+
+        private void SaveWindowPlacement()
+        {
+            if (options.HeadlessMode) return;
+            try
+            {
+                Rectangle normal = lastNormalBounds.Width >= 800 && lastNormalBounds.Height >= 500
+                    ? lastNormalBounds : (WindowState == FormWindowState.Normal ? Bounds : RestoreBounds);
+                if (normal.Width < 800 || normal.Height < 500) return;
+                bool maximized = WindowState == FormWindowState.Maximized ||
+                    (WindowState == FormWindowState.Minimized && lastWindowWasMaximized);
+                var value = new { x = normal.X, y = normal.Y,
+                    width = normal.Width, height = normal.Height, maximized };
+                string target = windowPlacementFile + ".tmp";
+                File.WriteAllText(target, System.Text.Json.JsonSerializer.Serialize(value));
+                File.Move(target, windowPlacementFile, true);
+            }
+            catch (Exception e) { Debug.WriteLine("Window placement save: " + e.Message); }
         }
 
         private void SetupLifecycleDiagnostics()
@@ -926,6 +1050,8 @@ html.tt-floating-mode .ytp-chrome-bottom { bottom: 0 !important; }
             sb.AppendLine($"    \"windowCyclePass\": {Interlocked.Read(ref windowCyclePass)},");
             sb.AppendLine($"    \"windowFullMonitorPass\": {Interlocked.Read(ref windowFullMonitorPass)},");
             sb.AppendLine($"    \"windowRestorePass\": {Interlocked.Read(ref windowRestorePass)},");
+            sb.AppendLine($"    \"windowPlacementRestored\": {Interlocked.Read(ref windowPlacementRestored)},");
+            sb.AppendLine($"    \"floatingAcceleratorHandled\": {Interlocked.Read(ref floatingAcceleratorHandled)},");
             sb.AppendLine($"    \"floatingWindowCyclePass\": {Interlocked.Read(ref floatingWindowCyclePass)},");
             sb.AppendLine($"    \"sponsorBlockSkipCount\": {Interlocked.Read(ref sponsorBlockSkipCount)}");
             sb.AppendLine("  },");
@@ -972,7 +1098,10 @@ html.tt-floating-mode .ytp-chrome-bottom { bottom: 0 !important; }
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
-            if (keyData == (Keys.Control | Keys.Shift | Keys.P))
+            // WinForms fallback when the native title bar, not WebView, has
+            // focus. With WebView focus its KeyDown handler owns the shortcut.
+            if ((webView == null || !webView.ContainsFocus) &&
+                (keyData == (Keys.Control | Keys.Shift | Keys.P) || keyData == Keys.F9))
             {
                 _ = ToggleFloatingWindowAsync();
                 return true;
@@ -1012,6 +1141,9 @@ html.tt-floating-mode .ytp-chrome-bottom { bottom: 0 !important; }
                 _ = ToggleFloatingWindowAsync(true); // X restores the regular app, does not stop video.
                 return;
             }
+            // Do not persist a miniature window, immersive bounds or minimized
+            // state on shutdown. Only the last normal/restorable geometry.
+            if (!nativeFloatingActive && !nativeImmersiveActive) SaveWindowPlacement();
             memoryTrimTimer?.Stop();
             memoryTrimTimer?.Dispose();
             smokeTestTimer?.Stop();

@@ -771,13 +771,19 @@ class ViewingExperience {
     this.lastVideo = null;
     this.theaterObserver = null;
     this.theaterElement = null;
-    this.pipButton = null;
-    this._boundFloatingKey = e => {
-      if (e.ctrlKey && e.shiftKey && e.code === 'KeyP' && !e.repeat) {
-        e.preventDefault?.();
-        this.togglePictureInPicture();
-      }
+    this.theaterButton = null;
+    this._boundTheaterClick = () => {
+      // Snapshot YouTube's actual post-click layout. Only user clicks are
+      // recorded: our own restore clicks run with saveTheaterSuppressed=true.
+      if (this.saveTheaterSuppressed) return;
+      setTimeout(() => {
+        if (!this.disposed && this.getVideoId() && this.theaterElement)
+          this.setTheaterPreference(this.theaterElement.hasAttribute('theater'));
+      }, 180);
     };
+    this.pipButton = null;
+    // The native WebView2 controller handles floating shortcuts: Chromium
+    // consumes Ctrl+Shift+P for Print before a document keydown can cancel it.
     this.retryTimer = null;
     this.saveTheaterSuppressed = false;
     this.isNavigating = false;
@@ -883,11 +889,16 @@ class ViewingExperience {
     const flexy = document.querySelector?.('ytd-watch-flexy');
     const theaterButton = document.querySelector?.('.ytp-size-button');
     if (!flexy || !theaterButton) return false;
+    if (this.theaterButton !== theaterButton) {
+      this.theaterButton?.removeEventListener?.('click', this._boundTheaterClick);
+      this.theaterButton = theaterButton;
+      this.theaterButton.addEventListener?.('click', this._boundTheaterClick);
+    }
     if (this.theaterElement !== flexy) {
       this.theaterObserver?.disconnect();
       this.theaterElement = flexy;
       if (typeof MutationObserver !== 'undefined') {
-        this.theaterObserver = new MutationObserver(() => {
+    this.theaterObserver = new MutationObserver(() => {
           if (!this.saveTheaterSuppressed && !this.isNavigating)
             this.setTheaterPreference(flexy.hasAttribute('theater'));
         });
@@ -895,7 +906,12 @@ class ViewingExperience {
       }
     }
     const saved = this.savedTheaterState();
-    if (saved === null) return true;
+    if (saved === null) {
+      // Critical: a first-time user must be allowed to save their FIRST
+      // theater click. Previously isNavigating stayed true forever here.
+      this.isNavigating = false;
+      return true;
+    }
     const current = flexy.hasAttribute('theater');
     if (saved !== current) {
       this.saveTheaterSuppressed = true;
@@ -939,7 +955,7 @@ class ViewingExperience {
     button.id = 'tizentube-native-pip';
     button.type = 'button';
     button.className = 'ytp-button';
-    button.title = 'Reproductor flotante · Ctrl+Mayús+P';
+    button.title = 'Reproductor flotante · F9 (o Ctrl+Mayús+P)';
     button.setAttribute('aria-label', 'Imagen en imagen');
     button.setAttribute('aria-pressed', 'false');
     button.innerHTML = '<svg viewBox="0 0 36 36" width="34" height="34" aria-hidden="true">' +
@@ -991,7 +1007,6 @@ class ViewingExperience {
     window.addEventListener('yt-navigate-finish', this._boundNav);
     window.addEventListener('popstate', this._boundNav);
     window.addEventListener('pagehide', this._boundVisibility);
-    window.addEventListener('keydown', this._boundFloatingKey);
     document?.addEventListener?.('visibilitychange', this._boundVisibility);
     this.playback?.on('timeupdate', this._boundTime);
     this.playback?.on('ready', this._boundReady);
@@ -1003,13 +1018,13 @@ class ViewingExperience {
     this.disposed = true;
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.theaterObserver?.disconnect();
+    this.theaterButton?.removeEventListener?.('click', this._boundTheaterClick);
     this.pipButton?.remove?.();
     if (typeof window !== 'undefined') {
       window.removeEventListener('yt-navigate-finish', this._boundNav);
       window.removeEventListener('yt-navigate-start', this._boundNavStart);
       window.removeEventListener('popstate', this._boundNav);
       window.removeEventListener('pagehide', this._boundVisibility);
-      window.removeEventListener('keydown', this._boundFloatingKey);
     }
     if (typeof document !== 'undefined') document.removeEventListener?.('visibilitychange', this._boundVisibility);
     this.playback?.off?.('timeupdate', this._boundTime);
