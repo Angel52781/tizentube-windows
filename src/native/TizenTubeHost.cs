@@ -1347,12 +1347,17 @@ namespace TizenTubeWindows
                 }
                 if (options.NavigationBackProbe)
                 {
-                    string navTest = "(() => {const back=document.getElementById('tizentube-masthead-back');" +
-                        "if(!back)return null;const original=location.pathname+location.search;" +
+                    // Exercise the native toolbar (not an in-page DOM element).
+                    string navTest = "(() => {const original=location.pathname+location.search;" +
                         "history.pushState({ttTest:true},'', '/results?search_query=tizentube-ci-back');" +
-                        "const pushed=location.pathname;back.click();" +
-                        "return {found:true,original,pushed};})()";
+                        "return {original,pushed:location.pathname};})()";
                     string initial = await webView.CoreWebView2.ExecuteScriptAsync(navTest);
+                    await Task.Delay(500);
+                    UpdateNavigationToolbar();
+                    bool nativeToolbarPresent = navigationToolbar != null &&
+                        navigationToolbar.Visible;
+                    bool nativeToolbarEnabled = navigationToolbar?.BackEnabled == true;
+                    bool nativeToolbarClicked = navigationToolbar?.InvokeBackForProbe() == true;
                     string now = "null";
                     string nativePath = "";
                     // Record initial evidence BEFORE page transition queries.
@@ -1360,7 +1365,10 @@ namespace TizenTubeWindows
                     // consuming the smoke timeout without any diagnostic.
                     string proofFile = Path.Combine(folder, "navigation-back.json");
                     File.WriteAllText(proofFile,
-                        "{\"request\":" + initial + ",\"result\":null,\"nativeSource\":\"\"}");
+                        "{\"request\":" + initial + ",\"result\":null,\"nativeSource\":\"\"," +
+                        "\"toolbarPresent\":" + (nativeToolbarPresent ? "true" : "false") +
+                        ",\"toolbarEnabled\":" + (nativeToolbarEnabled ? "true" : "false") +
+                        ",\"toolbarClicked\":" + (nativeToolbarClicked ? "true" : "false") + "}");
                     // Do not ExecuteScriptAsync while YouTube navigates: on
                     // WebView2 this can hang until the smoke process exits.
                     // The native Source is observable even during transitions.
@@ -1377,7 +1385,10 @@ namespace TizenTubeWindows
                     }
                     File.WriteAllText(proofFile,
                         "{\"request\":" + initial + ",\"result\":" + now +
-                        ",\"nativeSource\":" + System.Text.Json.JsonSerializer.Serialize(nativePath) + "}");
+                        ",\"nativeSource\":" + System.Text.Json.JsonSerializer.Serialize(nativePath) +
+                        ",\"toolbarPresent\":" + (nativeToolbarPresent ? "true" : "false") +
+                        ",\"toolbarEnabled\":" + (nativeToolbarEnabled ? "true" : "false") +
+                        ",\"toolbarClicked\":" + (nativeToolbarClicked ? "true" : "false") + "}");
                 }
             }
             catch (Exception ex) { Console.Error.WriteLine("[Host UI Probe] " + ex.Message); }
