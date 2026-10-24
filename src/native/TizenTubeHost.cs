@@ -542,9 +542,8 @@ namespace TizenTubeWindows
             navigationToolbar?.SetMaximized(WindowState == FormWindowState.Maximized);
         }
 
-        protected override void WndProc(ref Message m)
+        private void ApplyBorderlessHitTest(ref Message m)
         {
-            base.WndProc(ref m);
             if (m.Msg != WmNcHitTest || m.Result.ToInt64() != HtClient ||
                 WindowState != FormWindowState.Normal ||
                 nativeImmersiveActive || nativeFloatingActive ||
@@ -784,6 +783,7 @@ namespace TizenTubeWindows
                 return;
             }
             base.WndProc(ref m);
+            ApplyBorderlessHitTest(ref m);
         }
 
         private void RememberWindowPlacement()
