@@ -946,26 +946,83 @@ namespace TizenTubeWindows
                 (DateTime.UtcNow - lastTheaterRestoreAttemptUtc).TotalMilliseconds < 2600) return;
             lastTheaterRestoreAttemptUtc = DateTime.UtcNow;
             theaterRestoreInProgress = true;
+            bool restoringFlagSet = false;
             try
             {
-                // Never synthesize a mouse click on YouTube's video controls:
-                // the physical Windows test revealed that CDP hit-testing can
-                // trigger FULLSCREEN rather than THEATER while the player is
-                // hydrating. Restore only the watch-layout DOM state.
-                string reconcileScript = "(() => { const f=document.querySelector('ytd-watch-flexy');" +
-                    "if (!f || location.pathname !== '/watch' || document.fullscreenElement) return false;" +
-                    "const wanted=" + (wanted ? "true" : "false") + ";" +
-                    "if (f.hasAttribute('theater') !== wanted) {" +
-                    " window.__TT_RESTORING_THEATER=true;" +
-                    " f.toggleAttribute('theater',wanted);" +
-                    " window.dispatchEvent(new Event('resize'));" +
-                    " window.__TT_RESTORING_THEATER=false;" +
-                    "} return f.hasAttribute('theater') === wanted; })()";
-                string applied = await webView.CoreWebView2.ExecuteScriptAsync(reconcileScript);
-                if (applied == "true") Interlocked.Increment(ref nativeTheaterRestored);
+                // DOM-only theater attribute changes collapse the video to
+                // zero size on real YouTube. Wait until the actual player is
+                // ready, reveal the controls, then click ONLY if hit-testing
+                // identifies the native theater button under that coordinate.
+                await Task.Delay(4900);
+                if (IsDisposed || webView?.CoreWebView2 == null || nativeFloatingActive) return;
+                string buttonPoint = await webView.CoreWebView2.ExecuteScriptAsync(
+                    "(() => {const b=document.querySelector('.ytp-size-button');" +
+                    "if(!b)return null;const r=b.getBoundingClientRect();" +
+                    "return {x:r.left+r.width/2,y:r.top+r.height/2};})()");
+                if (buttonPoint == "null") return;
+                double mouseX, mouseY;
+                using (var point = System.Text.Json.JsonDocument.Parse(buttonPoint))
+                {
+                    mouseX = point.RootElement.GetProperty("x").GetDouble();
+                    mouseY = point.RootElement.GetProperty("y").GetDouble();
+                }
+                if (mouseX <= 0 || mouseY <= 0 ||
+                    mouseX >= webView.Width || mouseY >= webView.Height) return;
+                string move = System.Text.Json.JsonSerializer.Serialize(new {
+                    type = "mouseMoved", x = mouseX, y = mouseY });
+                await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                    "Input.dispatchMouseEvent", move);
+                await Task.Delay(240);
+                string coords = await webView.CoreWebView2.ExecuteScriptAsync(
+                    "(() => {const b=document.querySelector('.ytp-size-button');" +
+                    "const f=document.querySelector('ytd-watch-flexy');" +
+                    "const v=document.querySelector('video.html5-main-video');" +
+                    "if(!b||!f||!v||location.pathname!=='/watch'||document.fullscreenElement||" +
+                    "v.readyState<2||v.videoWidth<1)return null;" +
+                    "const r=b.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;" +
+                    "const hit=document.elementFromPoint(x,y);" +
+                    "return {theater:f.hasAttribute('theater')," +
+                    "safe:r.width>5&&r.height>5&&x>0&&y>0&&" +
+                    "(hit===b||b.contains(hit)),x,y};})()");
+                if (coords == "null") return;
+                using (var json = System.Text.Json.JsonDocument.Parse(coords))
+                {
+                    var info = json.RootElement;
+                    if (info.GetProperty("theater").GetBoolean() == wanted) return;
+                    if (!info.GetProperty("safe").GetBoolean()) return;
+                    double x = info.GetProperty("x").GetDouble();
+                    double y = info.GetProperty("y").GetDouble();
+                    await webView.CoreWebView2.ExecuteScriptAsync(
+                        "window.__TT_RESTORING_THEATER = true");
+                    restoringFlagSet = true;
+                    string press = System.Text.Json.JsonSerializer.Serialize(new {
+                        type = "mousePressed", x, y, button = "left", clickCount = 1 });
+                    string release = System.Text.Json.JsonSerializer.Serialize(new {
+                        type = "mouseReleased", x, y, button = "left", clickCount = 1 });
+                    await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                        "Input.dispatchMouseEvent", press);
+                    await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                        "Input.dispatchMouseEvent", release);
+                    await Task.Delay(280);
+                    string verified = await webView.CoreWebView2.ExecuteScriptAsync(
+                        "(() => {if(document.fullscreenElement) return 'wrong-fullscreen';" +
+                        "const f=document.querySelector('ytd-watch-flexy');return f?.hasAttribute('theater')=== " +
+                        (wanted ? "true" : "false") + " ? 'restored':'unchanged';})()");
+                    if (verified == "\"restored\"")
+                        Interlocked.Increment(ref nativeTheaterRestored);
+                    else if (verified == "\"wrong-fullscreen\"")
+                        await webView.CoreWebView2.ExecuteScriptAsync(
+                            "document.exitFullscreen?.().catch?.(()=>{})");
+                }
             }
             catch (Exception ex) { Debug.WriteLine("[Host Theater Restore] " + ex.Message); }
-            finally { theaterRestoreInProgress = false; }
+            finally
+            {
+                if (restoringFlagSet && webView?.CoreWebView2 != null)
+                    try { await webView.CoreWebView2.ExecuteScriptAsync(
+                        "window.__TT_RESTORING_THEATER = false"); } catch { }
+                theaterRestoreInProgress = false;
+            }
         }
 
         private async Task ToggleFloatingWindowAsync(bool restore = false)
