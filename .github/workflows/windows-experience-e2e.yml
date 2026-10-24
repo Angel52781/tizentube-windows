@@ -11,6 +11,9 @@ on:
       - 'scripts/**'
       - '.github/workflows/windows-experience-e2e.yml'
       - 'package.json'
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -41,6 +44,7 @@ jobs:
           node scripts/bundle_mods.js
           node scripts/test_runtime.js
           node scripts/test_ui_features.js
+          node scripts/test_keyboard_shortcuts.js
           node scripts/test_hidpi_comments_ux.js
           node scripts/test_mods_fault_tolerance.js
           node scripts/test_live_injection_lifecycle.js
