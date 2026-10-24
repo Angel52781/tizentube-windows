@@ -45,6 +45,7 @@ jobs:
           node scripts/test_mods_fault_tolerance.js
           node scripts/test_live_injection_lifecycle.js
           node scripts/test_viewing_experience.js
+          node scripts/test_navigation_and_persistence.js
           node scripts/test_loader_mount_recovery.js
           node scripts/test_floating_player.js
           node scripts/test_sponsored_feed.js

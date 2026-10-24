@@ -40,6 +40,9 @@ namespace TizenTubeWindows
         public bool FloatingVisualProbe { get; set; } = false;
         public bool TheaterUserProbe { get; set; } = false;
         public bool TheaterRestoreProbe { get; set; } = false;
+        public bool PreferencesSetupProbe { get; set; } = false;
+        public bool PreferencesRestartProbe { get; set; } = false;
+        public bool NavigationBackProbe { get; set; } = false;
 
         public static HostOptions Parse(string[] args)
         {
@@ -128,6 +131,9 @@ namespace TizenTubeWindows
                 {
                     options.TheaterRestoreProbe = true;
                 }
+                else if (arg == "--preferences-setup-probe") options.PreferencesSetupProbe = true;
+                else if (arg == "--preferences-restart-probe") options.PreferencesRestartProbe = true;
+                else if (arg == "--navigation-back-probe") options.NavigationBackProbe = true;
                 else if (arg == "--help" || arg == "-h")
                 {
                     options.ShowHelp = true;
@@ -232,6 +238,7 @@ namespace TizenTubeWindows
         private long nativeTheaterRestored = 0;
         private bool floatingVisualProbeStarted = false;
         private bool theaterProbeStarted = false;
+        private bool preferencesProbeStarted = false;
         private long blockedAdCount = 0;
         private long trimCount = 0;
         private long modsInitializedCount = 0;
@@ -467,6 +474,15 @@ namespace TizenTubeWindows
                         if (!nav.IsSuccess || theaterProbeStarted || IsDisposed) return;
                         theaterProbeStarted = true;
                         await CaptureTheaterProbeAsync();
+                    };
+                }
+                if (options.PreferencesSetupProbe || options.PreferencesRestartProbe || options.NavigationBackProbe)
+                {
+                    webView.CoreWebView2.NavigationCompleted += async (sender, nav) =>
+                    {
+                        if (!nav.IsSuccess || preferencesProbeStarted || IsDisposed) return;
+                        preferencesProbeStarted = true;
+                        await CapturePreferencesAndNavigationProbeAsync();
                     };
                 }
 
@@ -1013,6 +1029,58 @@ namespace TizenTubeWindows
             catch (Exception ex) { Console.Error.WriteLine("[Host Theater Probe] " + ex.Message); }
         }
 
+        private async Task CapturePreferencesAndNavigationProbeAsync()
+        {
+            // Tests run exclusively on isolated Windows-hosted GitHub runners.
+            // No tokens, cookies or account data in the exported artifacts.
+            try
+            {
+                await Task.Delay(11000);
+                if (IsDisposed || webView?.CoreWebView2 == null) return;
+                string folder = Path.GetDirectoryName(options.TelemetryFilePath ?? "");
+                if (string.IsNullOrEmpty(folder)) folder = appDataDir;
+                Directory.CreateDirectory(folder);
+                if (options.PreferencesSetupProbe)
+                {
+                    string write = "(() => { const u=window.__TIZENTUBE_LOADER__?.ui;" +
+                        "if (!u?.isMounted) return false;" +
+                        "const s=u.settingsModal.getSettings();" +
+                        "s.ui.highContrast=true; s.sponsorblock.autoSkip=false;" +
+                        "s.playback.defaultSpeed=1.5;" +
+                        "u.settingsModal.loadSettings(s);u.applySettings(s);u.savePreferences(s);" +
+                        "return true; })()";
+                    File.WriteAllText(Path.Combine(folder, "preferences-setup.json"),
+                        await webView.CoreWebView2.ExecuteScriptAsync(write));
+                    await Task.Delay(450);
+                }
+                if (options.PreferencesRestartProbe)
+                {
+                    string read = "(() => {const u=window.__TIZENTUBE_LOADER__?.ui;" +
+                        "if (!u?.isMounted) return null;const s=u.settingsModal.getSettings();" +
+                        "return {highContrast:s.ui.highContrast," +
+                        "autoSkip:s.sponsorblock.autoSkip,defaultSpeed:s.playback.defaultSpeed," +
+                        "hostPrefsPresent:!!window.__TIZENTUBE_INITIAL_PREFERENCES__};})()";
+                    File.WriteAllText(Path.Combine(folder, "preferences-restart.json"),
+                        await webView.CoreWebView2.ExecuteScriptAsync(read));
+                }
+                if (options.NavigationBackProbe)
+                {
+                    string navTest = "(() => {const back=document.getElementById('tizentube-masthead-back');" +
+                        "if(!back)return null;const original=location.pathname+location.search;" +
+                        "history.pushState({ttTest:true},'', '/results?search_query=tizentube-ci-back');" +
+                        "const pushed=location.pathname;back.click();" +
+                        "return {found:true,original,pushed};})()";
+                    string initial = await webView.CoreWebView2.ExecuteScriptAsync(navTest);
+                    await Task.Delay(1200);
+                    string now = await webView.CoreWebView2.ExecuteScriptAsync(
+                        "({current:location.pathname+location.search,buttonExists:!!document.getElementById('tizentube-masthead-back')})");
+                    File.WriteAllText(Path.Combine(folder, "navigation-back.json"),
+                        "{\"request\":" + initial + ",\"result\":" + now + "}");
+                }
+            }
+            catch (Exception ex) { Console.Error.WriteLine("[Host UI Probe] " + ex.Message); }
+        }
+
         private async Task RestoreTheaterViaTrustedInputAsync(bool wanted)
         {
             if (webView?.CoreWebView2 == null || theaterRestoreInProgress ||
@@ -1237,11 +1305,27 @@ namespace TizenTubeWindows
                     }
                     else if (json.Contains("preferences:save"))
                     {
-                        // Persist user preferences to local JSON on Windows disk
+                        // Native profile persists across executable updates,
+                        // window close, and computer restart. Only the trusted
+                        // first-party main document may update these settings.
                         try
                         {
+                            if (!Uri.TryCreate(args.Source, UriKind.Absolute, out Uri sender) ||
+                                sender.Scheme != "https" ||
+                                (sender.Host != "www.youtube.com" && sender.Host != "youtube.com") ||
+                                json.Length > 12000) return;
+                            using (var parsed = System.Text.Json.JsonDocument.Parse(json))
+                            {
+                                var root = parsed.RootElement;
+                                if (!root.TryGetProperty("channel", out var channel) ||
+                                    channel.GetString() != "preferences:save" ||
+                                    !root.TryGetProperty("payload", out var payload) ||
+                                    payload.ValueKind != System.Text.Json.JsonValueKind.Object) return;
+                            }
                             string prefsPath = Path.Combine(appDataDir, "user_preferences.json");
-                            File.WriteAllText(prefsPath, json);
+                            string tmp = prefsPath + ".tmp";
+                            File.WriteAllText(tmp, json);
+                            File.Move(tmp, prefsPath, true);
                             Console.WriteLine("[Host IPC] Preferences persisted to: " + prefsPath);
                             Debug.WriteLine("[Host IPC] Preferences persisted to: " + prefsPath);
                         }
@@ -1308,6 +1392,8 @@ namespace TizenTubeWindows
             // Video compositing fix lives in a separate, auditable script.
             await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
                 ReadEmbeddedRequired("TizenTube.FloatingPlayer"));
+            await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                ReadEmbeddedRequired("TizenTube.NavigationControls"));
             // The owner's explicit theater preference is durable independently
             // of YouTube's own UI resets or localStorage migrations.
             if (File.Exists(theaterPreferenceFile))

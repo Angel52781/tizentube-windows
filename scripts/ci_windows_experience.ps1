@@ -86,6 +86,31 @@ try {
     Assert-E2E ($settled.pipButtonVisible -and $settled.pipButtonBetweenCaptionsAndSettings) 'floating-control-exactly-between-cc-and-settings'
     Assert-E2E ($settled.currentTime -gt $restart.currentTime) 'playback-continues-after-cinema-restore'
 
+    # Exercise the real settings modal -> IPC -> Windows disk pipeline across
+    # independent exe launches. Windows runner reboot isn't necessary: a new
+    # process proves settings survived beyond process-local JS/session memory.
+    Write-Host 'Checking persisted settings and YouTube masthead Back control...'
+    Invoke-Host 'preferences-first-launch' @('--preferences-setup-probe') 30
+    $setup = Read-Json 'preferences-setup.json'
+    Assert-E2E ($setup -eq $true) 'settings-ui-save-dispatched'
+    $prefsFile = Join-Path $env:LOCALAPPDATA 'TizenTube\UserData\user_preferences.json'
+    Assert-E2E (Test-Path $prefsFile) 'settings-saved-to-native-windows-profile'
+    $nativePrefs = (Get-Content $prefsFile -Raw -Encoding utf8 | ConvertFrom-Json)
+    Assert-E2E ($nativePrefs.payload.ui.highContrast -eq $true -and
+        $nativePrefs.payload.sponsorblock.autoSkip -eq $false -and
+        $nativePrefs.payload.playback.defaultSpeed -eq 1.5) 'native-disk-preserves-last-settings-choice'
+    Invoke-Host 'preferences-independent-restart' @('--preferences-restart-probe') 30
+    $restored = Read-Json 'preferences-restart.json'
+    Assert-E2E ($restored.hostPrefsPresent -and $restored.highContrast -and
+        $restored.autoSkip -eq $false -and $restored.defaultSpeed -eq 1.5) 'full-preferences-restored-in-new-windows-process'
+
+    Invoke-Host 'navigation-back' @('--navigation-back-probe') 30
+    $back = Read-Json 'navigation-back.json'
+    Assert-E2E ($back.request.found -and
+        $back.request.pushed -eq '/results' -and
+        $back.result.current -eq $back.request.original -and
+        $back.result.buttonExists) 'actual-youtube-masthead-back-navigates-spa-history'
+
     # HiDPI font rendering & comment layout probe verification
     Write-Host 'Verifying HiDPI layout, font rendering, and comment styles...'
     $layout = Read-Json 'hidpi-layout-probe.json'

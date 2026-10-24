@@ -533,7 +533,20 @@ export class AppUI {
    */
   loadPersistedPreferences() {
     let parsed = null;
-    if (typeof localStorage !== 'undefined') {
+    // The Windows host is authoritative after relaunch or machine reboot.
+    // The old implementation preferred WebView localStorage even when it held
+    // stale defaults, silently undoing an already-persisted native choice.
+    if (typeof window !== 'undefined' && window.__TIZENTUBE_INITIAL_PREFERENCES__) {
+      try {
+        const raw = window.__TIZENTUBE_INITIAL_PREFERENCES__;
+        const hostValue = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const candidate = hostValue?.channel === 'preferences:save'
+          ? hostValue.payload : hostValue;
+        if (candidate && typeof candidate === 'object' && !Array.isArray(candidate))
+          parsed = candidate;
+      } catch (_) {}
+    }
+    if (!parsed && typeof localStorage !== 'undefined') {
       try {
         const data = localStorage.getItem('tizentube_settings');
         if (data) {
@@ -542,15 +555,10 @@ export class AppUI {
       } catch (_) {}
     }
 
-    if (!parsed && typeof window !== 'undefined' && window.__TIZENTUBE_INITIAL_PREFERENCES__) {
-      try {
-        const init = window.__TIZENTUBE_INITIAL_PREFERENCES__;
-        const raw = typeof init === 'string' ? JSON.parse(init) : init;
-        parsed = (raw && raw.payload) ? raw.payload : raw;
-      } catch (_) {}
-    }
-
     if (parsed) {
+      // Reconcile website storage after a native restore so subsequent SPA
+      // navigation cannot resurrect outdated per-origin preferences.
+      try { localStorage?.setItem('tizentube_settings', JSON.stringify(parsed)); } catch (_) {}
       this.settingsModal.loadSettings(parsed);
       this.applySettings(parsed);
     }

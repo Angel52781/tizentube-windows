@@ -59,6 +59,28 @@
 }
 .ytp-right-controls #tizentube-native-pip.ytp-button:hover { color: #eee; }
 
+/* Back next to the official YouTube hamburger; the YouTube logo only goes Home.
+ * Keep this independent from the optional in-page TizenTube nav overlay. */
+ytd-masthead #tizentube-masthead-back.tt-masthead-back,
+#masthead-container #tizentube-masthead-back.tt-masthead-back {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  margin: 0 4px 0 0;
+  padding: 8px;
+  background: transparent;
+  color: var(--yt-spec-text-primary, #f1f1f1);
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 1;
+}
+ytd-masthead #tizentube-masthead-back:hover { background: var(--yt-spec-badge-chip-background, #292929); }
+ytd-masthead #tizentube-masthead-back:focus-visible { outline: 2px solid #3ea6ff; outline-offset: 2px; }
+
 /* ============================================================================
    HiDPI Font Rendering, Text Clarity & Comment Layout Engine
    Ensures crisp typography across high-DPI displays (125%, 150%, 200%)
