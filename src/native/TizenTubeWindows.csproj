@@ -33,7 +33,6 @@
     <EmbeddedResource Include="../../src/mods/tizentube.bundle.js" LogicalName="TizenTube.InjectedBundle" />
     <EmbeddedResource Include="../../src/ui/styles.css" LogicalName="TizenTube.InjectedStyles" />
     <EmbeddedResource Include="floating_player.js" LogicalName="TizenTube.FloatingPlayer" />
-    <EmbeddedResource Include="navigation_controls.js" LogicalName="TizenTube.NavigationControls" />
   </ItemGroup>
 
   <ItemGroup>
