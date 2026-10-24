@@ -225,10 +225,11 @@ export class AdBlockBase {
       this.cleanAdData(obj.playerResponse);
     }
 
-    // Clean masthead / home feed / search ad slots in browse responses
+    // Clean masthead / home feed / search / watch ad slots in browse & watch responses
     if (obj.contents && typeof obj.contents === 'object') {
       this.cleanBrowseAds(obj.contents);
       this.cleanSearchAds(obj.contents);
+      this.cleanWatchAds(obj.contents);
     }
 
     // Clean continuation browse feeds
@@ -250,13 +251,14 @@ export class AdBlockBase {
 
   /**
    * Cleans ad renderers from browse/feed responses.
-   * @param {Object} contents 
+   * @param {Object} contents
    */
   cleanBrowseAds(contents) {
     if (!contents) return;
 
     // Desktop tabs: sectionListRenderer and modern richGridRenderer
-    const tabs = contents.twoColumnBrowseResultsRenderer?.tabs;
+    const tabs = contents.twoColumnBrowseResultsRenderer?.tabs
+      || contents.singleColumnBrowseResultsRenderer?.tabs;
     if (Array.isArray(tabs)) {
       for (const tab of tabs) {
         const tabContent = tab?.tabRenderer?.content;
@@ -274,6 +276,12 @@ export class AdBlockBase {
       }
     }
 
+    // Secondary contents in twoColumnBrowseResultsRenderer
+    if (Array.isArray(contents.twoColumnBrowseResultsRenderer?.secondaryContents?.sectionListRenderer?.contents)) {
+      contents.twoColumnBrowseResultsRenderer.secondaryContents.sectionListRenderer.contents =
+        this.removeSponsoredItems(contents.twoColumnBrowseResultsRenderer.secondaryContents.sectionListRenderer.contents);
+    }
+
     // Mobile / TV sectionListRenderer
     const tvSections = contents.tvBrowseRenderer?.content?.tvSurfaceContentRenderer?.content?.sectionListRenderer?.contents;
     if (Array.isArray(tvSections)) {
@@ -286,6 +294,34 @@ export class AdBlockBase {
         }
       }
       contents.tvBrowseRenderer.content.tvSurfaceContentRenderer.content.sectionListRenderer.contents = filtered;
+    }
+  }
+
+  /**
+   * Cleans ad slots and sponsored companion items from watch page responses.
+   * Handles twoColumnWatchNextResults and singleColumnWatchNextResults.
+   * @param {Object} contents
+   */
+  cleanWatchAds(contents) {
+    if (!contents) return;
+
+    // Desktop two-column watch next results (secondary sidebar & primary panels)
+    const watchNext = contents.twoColumnWatchNextResults;
+    if (watchNext) {
+      const secondaryResults = watchNext.secondaryResults?.secondaryResults?.results;
+      if (Array.isArray(secondaryResults)) {
+        watchNext.secondaryResults.secondaryResults.results = this.removeSponsoredItems(secondaryResults);
+      }
+      const secondarySectionList = watchNext.secondaryResults?.secondaryResults?.sectionListRenderer?.contents;
+      if (Array.isArray(secondarySectionList)) {
+        watchNext.secondaryResults.secondaryResults.sectionListRenderer.contents = this.removeSponsoredItems(secondarySectionList);
+      }
+    }
+
+    // Single column watch next results (fallback / compact layouts)
+    const singleSections = contents.singleColumnWatchNextResults?.pivot?.sectionListRenderer?.contents;
+    if (Array.isArray(singleSections)) {
+      contents.singleColumnWatchNextResults.pivot.sectionListRenderer.contents = this.removeSponsoredItems(singleSections);
     }
   }
 
@@ -325,12 +361,26 @@ export class AdBlockBase {
       'adSlotRenderer', 'inFeedAdRenderer', 'displayAdRenderer',
       'promotedVideoRenderer', 'promotedSparklesWebRenderer',
       'videoMastheadAdRenderer', 'videoMastheadAdV3Renderer',
-      'searchPyvRenderer'
+      'videoMastheadAdPrimaryVideoRenderer',
+      'searchPyvRenderer', 'brandVideoSingletonRenderer',
+      'statementBannerRenderer', 'adSlotHeaderRenderer',
+      'compactPromotedVideoRenderer', 'compactPromotedItemRenderer',
+      'actionCompanionAdRenderer'
     ];
     return items.filter(item => {
-      const nested = [item, item?.richItemRenderer?.content,
-        item?.richSectionRenderer?.content, item?.itemSectionRenderer?.content];
-      const sponsored = nested.some(part => part && adKeys.some(key => Object.hasOwn(part, key)));
+      const nested = [
+        item,
+        item?.richItemRenderer?.content,
+        item?.richSectionRenderer?.content,
+        item?.itemSectionRenderer?.content,
+        item?.compactVideoRenderer
+      ];
+      const sponsored = nested.some(part => {
+        if (!part) return false;
+        if (adKeys.some(key => Object.hasOwn(part, key))) return true;
+        if (part?.adClientParams?.isAd === true) return true;
+        return false;
+      });
       if (sponsored) this.blockedCount++;
       return !sponsored;
     });
@@ -353,10 +403,21 @@ export class AdBlockBase {
       .ytp-ad-overlay-container,
       .ytp-ad-overlay-slot,
       .ytp-ad-image-overlay,
+      .ytp-ad-player-overlay,
+      .ytp-ad-player-overlay-layout,
+      .ytp-ad-message-container,
+      .ytp-ad-progress,
+      .ytp-ad-progress-list,
+      .ytp-ad-overlay-close-button,
       ytd-promoted-sparkles-web-renderer,
       ytd-promoted-video-renderer,
       ytd-display-ad-renderer,
       ytd-compact-promoted-video-renderer,
+      ytd-compact-promoted-item-renderer,
+      ytd-action-companion-ad-renderer,
+      ytd-ad-slot-header-renderer,
+      ytd-statement-banner-renderer,
+      ytd-player-legacy-desktop-watch-ads-renderer,
       ytd-search-pyv-renderer,
       ytd-video-masthead-ad-renderer,
       ytd-video-masthead-ad-v3-renderer,
@@ -367,6 +428,9 @@ export class AdBlockBase {
       #masthead-ad,
       ytd-companion-slot-renderer,
       ytd-in-feed-ad-layout-renderer,
+      ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-ads"],
+      #panels:has(ytd-ads-engagement-panel-content-renderer),
+      #panels:has(ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-ads"]),
       ytd-rich-item-renderer:has(ytd-ad-slot-renderer),
       ytd-rich-item-renderer:has(ytd-in-feed-ad-layout-renderer),
       ytd-rich-item-renderer:has(ytd-display-ad-renderer),
@@ -421,8 +485,8 @@ export class AdBlockBase {
       ) || [];
       const adBadge = Array.from(badges).some(badge => {
         const label = String(badge.getAttribute?.('aria-label') || badge.textContent || '')
-          .normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
-        return /^(patrocinad[oa]s?|promocionad[oa]s?|sponsored|promoted|advertisement|publicidad|anuncio|paid promotion|ad)$/.test(label);
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '').normalize('NFC').trim().toLowerCase();
+        return /^(patrocinad[oa]s?|promocionad[oa]s?|sponsored|promoted|advertisement|publicidad|anuncio|paid promotion|ad|sponsoris[eé]e?|publicit[eé]|annonce|gesponsert|anzeige|werbung|sponsorizzato|annuncio|スポンサー|広告)$/i.test(label);
       });
       if (adLink || adBadge) this.markSponsoredCard(card);
     }
@@ -473,7 +537,7 @@ export class AdBlockBase {
     for (const selector of known) {
       data.counts[selector] = document.querySelectorAll(selector).length;
     }
-    const badgePattern = /^(patrocinad[oa]s?|promocionad[oa]s?|sponsored|promoted|advertisement|publicidad|anuncio|paid promotion|ad)$/i;
+    const badgePattern = /^(patrocinad[oa]s?|promocionad[oa]s?|sponsored|promoted|advertisement|publicidad|anuncio|paid promotion|ad|sponsoris[eé]e?|publicit[eé]|annonce|gesponsert|anzeige|werbung|sponsorizzato|annuncio|スポンサー|広告)$/i;
     const candidates = document.querySelectorAll(
       'span, yt-formatted-string, yt-attributed-string, yt-badge-shape, yt-badge-shape-element'
     );
@@ -481,7 +545,7 @@ export class AdBlockBase {
       if (data.badgeAncestors.length >= 12) break;
       if (element.children?.length) continue;
       const label = String(element.textContent || '')
-        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').normalize('NFC').trim();
       if (!badgePattern.test(label)) continue;
       const ancestry = [];
       let node = element;
@@ -539,7 +603,11 @@ export class AdBlockBase {
         '.ytp-skip-ad-button-modern',
         '.videoAdUiSkipButton',
         'button.ytp-ad-skip-button-modern',
-        'button.ytp-skip-ad-button'
+        'button.ytp-skip-ad-button',
+        '.ytp-ad-skip-button-container button',
+        'button.ytp-ad-skip-button-text',
+        '.ytp-ad-overlay-close-button',
+        '.ytp-ad-overlay-close-container button'
       ];
 
       for (const sel of skipSelectors) {
@@ -551,9 +619,11 @@ export class AdBlockBase {
         }
       }
 
-      // 2. If video player is marked as showing an ad (.ad-showing), speed through it and mute
+      // 2. If video player is marked as showing an ad (.ad-showing / .ad-interrupting), speed through it and mute
       const player = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
-      const isAdShowing = Boolean(player && player.classList && player.classList.contains('ad-showing'));
+      const isAdShowing = Boolean(player && player.classList && (
+        player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting')
+      ));
       const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
 
       if (isAdShowing) {

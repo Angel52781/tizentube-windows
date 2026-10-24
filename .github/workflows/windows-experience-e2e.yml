@@ -21,7 +21,7 @@ concurrency:
 jobs:
   guest-windows-viewing:
     runs-on: windows-latest
-    timeout-minutes: 12
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -30,13 +30,27 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: Build bundled JavaScript and test feature lifecycle
         shell: pwsh
         run: |
           node scripts/bundle_mods.js
+          node scripts/test_runtime.js
+          node scripts/test_ui_features.js
+          node scripts/test_hidpi_comments_ux.js
+          node scripts/test_mods_fault_tolerance.js
+          node scripts/test_live_injection_lifecycle.js
           node scripts/test_viewing_experience.js
           node scripts/test_loader_mount_recovery.js
           node scripts/test_floating_player.js
+          node scripts/test_sponsored_feed.js
+          node scripts/test_original_tv_parity.js
+          node scripts/test_adblock_diagnostics.js
+          node scripts/test_bundle.js
+          node scripts/test_telemetry.js
+          node scripts/test_ci_windows_experience_suite.js
           if ($LASTEXITCODE -ne 0) { throw 'JS_FEATURE_REGRESSION_FAILED' }
       - name: Compile real Windows executable with embedded mods
         shell: pwsh
@@ -54,6 +68,12 @@ jobs:
           # sees the actual script exit status instead of a stale value.
           & pwsh -NoProfile -File ./scripts/ci_windows_experience.ps1 -Executable windows-experience-host/TizenTubeHost.exe -EvidenceDirectory windows-experience-evidence
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_REAL_VIDEO_E2E_FAILED' }
+      - name: Validate process-tree CPU and private RAM performance telemetry
+        shell: pwsh
+        run: |
+          node scripts/measure_process_telemetry.js --validate windows-experience-evidence/floating-telemetry.json
+          node scripts/measure_process_telemetry.js --validate windows-experience-evidence/theater-restart-telemetry.json
+          if ($LASTEXITCODE -ne 0) { throw 'PERFORMANCE_TELEMETRY_VALIDATION_FAILED' }
       - name: Preserve PASS or FAIL evidence from hosted Windows runner
         if: always()
         uses: actions/upload-artifact@v4

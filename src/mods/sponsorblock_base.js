@@ -52,6 +52,7 @@ export class SponsorBlockBase {
     this.options = {
       enabled: true,
       apiUrl: 'https://sponsor.ajay.app/api',
+      fallbackApiUrls: [],
       categories: ['sponsor', 'intro', 'outro', 'selfpromo', 'interaction'],
       autoSkip: true,
       showNotice: true,
@@ -67,6 +68,8 @@ export class SponsorBlockBase {
     this.skipCount = 0;
     this.lastSkipped = null;
     this.alreadySkippedSegments = new Set();
+    this.fallbackUsed = false;
+    this.fallbackUsedCount = 0;
 
     // Resilient bounded caching & deduplication to minimize network overhead and memory
     this.cache = new Map(); // videoId -> Array<Segment>
@@ -82,8 +85,13 @@ export class SponsorBlockBase {
    * @param {boolean} enabled 
    */
   setEnabled(enabled) {
+    const prev = this.options.enabled;
     this.options.enabled = Boolean(enabled);
-    if (!this.options.enabled) this.currentSegments = [];
+    if (!this.options.enabled) {
+      this.currentSegments = [];
+    } else if (!prev && this.currentVideoId && !this.currentSegments.length) {
+      void this.setVideo(this.currentVideoId);
+    }
   }
 
   /**
@@ -158,80 +166,102 @@ export class SponsorBlockBase {
     }
 
     const fetchPromise = (async () => {
-      if (typeof fetch === 'undefined') return [];
-
-      const catsParam = encodeURIComponent(JSON.stringify(this.options.categories));
-      const url = `${this.options.apiUrl}/skipSegments?videoID=${encodeURIComponent(videoId)}&categories=${catsParam}`;
-
-      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      const timeoutMs = this.options.timeoutMs || 4000;
-      const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
-
       try {
-        const res = await fetch(url, {
-          headers: { 'Accept': 'application/json' },
-          signal: controller ? controller.signal : undefined
-        });
+        if (typeof fetch === 'undefined') return [];
 
-        if (!res.ok) {
-          if (res.status === 404) {
-            // No segments exist for this video - cache empty array to avoid redundant queries
-            this.setCache(videoId, []);
+        const catsParam = encodeURIComponent(JSON.stringify(this.options.categories));
+        const urlsToTry = [
+          this.options.apiUrl,
+          ...(Array.isArray(this.options.fallbackApiUrls) ? this.options.fallbackApiUrls : [])
+        ];
+
+        for (let i = 0; i < urlsToTry.length; i++) {
+          const baseUrl = urlsToTry[i];
+          const url = `${baseUrl}/skipSegments?videoID=${encodeURIComponent(videoId)}&categories=${catsParam}`;
+
+          const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+          const timeoutMs = this.options.timeoutMs || 4000;
+          const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+          try {
+            const res = await fetch(url, {
+              headers: { 'Accept': 'application/json' },
+              signal: controller ? controller.signal : undefined
+            });
+
+            if (!res.ok) {
+              if (res.status === 404) {
+                // No segments exist for this video - cache empty array to avoid redundant queries
+                this.setCache(videoId, []);
+                this.consecutiveFailures = 0;
+                return [];
+              }
+              if (res.status === 429) {
+                // Rate limit encountered: trip circuit breaker with longer backoff
+                this.consecutiveFailures = this.options.circuitBreakerThreshold;
+                this.circuitCooldownUntil = Date.now() + Math.max(60000, this.options.circuitCooldownMs * 2);
+                return [];
+              }
+              throw new Error(`HTTP ${res.status}`);
+            }
+
+            let data;
+            try {
+              data = await res.json();
+            } catch (jsonErr) {
+              throw new Error(`Malformed JSON response: ${jsonErr.message}`);
+            }
+
+            if (!Array.isArray(data)) {
+              this.setCache(videoId, []);
+              return [];
+            }
+
+            const segments = data
+              .filter(item => Array.isArray(item.segment) && item.segment.length === 2 && !isNaN(item.segment[0]) && !isNaN(item.segment[1]))
+              .map(item => {
+                const catInfo = SPONSORBLOCK_CATEGORIES[item.category] || {
+                  color: '#00d400',
+                  name: item.category || 'Segment'
+                };
+                return {
+                  category: item.category,
+                  categoryName: catInfo.name,
+                  color: catInfo.color,
+                  start: Math.max(0, item.segment[0]),
+                  end: Math.max(0, item.segment[1]),
+                  segment: [Math.max(0, item.segment[0]), Math.max(0, item.segment[1])],
+                  uuid: item.UUID || `${item.category}_${item.segment[0]}`
+                };
+              });
+
+            this.setCache(videoId, segments);
             this.consecutiveFailures = 0;
+            this.circuitCooldownUntil = 0;
+            this.fallbackUsed = (baseUrl !== this.options.apiUrl);
+            if (this.fallbackUsed) {
+              this.fallbackUsedCount = (this.fallbackUsedCount || 0) + 1;
+              console.info(`[SponsorBlock] Fallback mirror succeeded for ${videoId} using ${baseUrl}`);
+            }
+            return segments;
+          } catch (err) {
+            // If we have remaining fallback URLs to attempt, try next mirror
+            if (i < urlsToTry.length - 1) {
+              console.warn(`[SponsorBlock] Query to ${baseUrl} failed for ${videoId}, attempting fallback mirror:`, err.message);
+              continue;
+            }
+            this.consecutiveFailures++;
+            if (this.consecutiveFailures >= this.options.circuitBreakerThreshold) {
+              this.circuitCooldownUntil = Date.now() + this.options.circuitCooldownMs;
+            }
+            console.warn(`[SponsorBlock] Query failed for ${videoId} (fail-open):`, err.message);
             return [];
+          } finally {
+            if (timeoutId) clearTimeout(timeoutId);
           }
-          if (res.status === 429) {
-            // Rate limit encountered: trip circuit breaker with longer backoff
-            this.consecutiveFailures = this.options.circuitBreakerThreshold;
-            this.circuitCooldownUntil = Date.now() + Math.max(60000, this.options.circuitCooldownMs * 2);
-            return [];
-          }
-          throw new Error(`HTTP ${res.status}`);
         }
-
-        let data;
-        try {
-          data = await res.json();
-        } catch (jsonErr) {
-          throw new Error(`Malformed JSON response: ${jsonErr.message}`);
-        }
-
-        if (!Array.isArray(data)) {
-          this.setCache(videoId, []);
-          return [];
-        }
-
-        const segments = data
-          .filter(item => Array.isArray(item.segment) && item.segment.length === 2 && !isNaN(item.segment[0]) && !isNaN(item.segment[1]))
-          .map(item => {
-            const catInfo = SPONSORBLOCK_CATEGORIES[item.category] || {
-              color: '#00d400',
-              name: item.category || 'Segment'
-            };
-            return {
-              category: item.category,
-              categoryName: catInfo.name,
-              color: catInfo.color,
-              start: Math.max(0, item.segment[0]),
-              end: Math.max(0, item.segment[1]),
-              segment: [Math.max(0, item.segment[0]), Math.max(0, item.segment[1])],
-              uuid: item.UUID || `${item.category}_${item.segment[0]}`
-            };
-          });
-
-        this.setCache(videoId, segments);
-        this.consecutiveFailures = 0;
-        this.circuitCooldownUntil = 0;
-        return segments;
-      } catch (err) {
-        this.consecutiveFailures++;
-        if (this.consecutiveFailures >= this.options.circuitBreakerThreshold) {
-          this.circuitCooldownUntil = Date.now() + this.options.circuitCooldownMs;
-        }
-        console.warn(`[SponsorBlock] Query failed for ${videoId} (fail-open):`, err.message);
         return [];
       } finally {
-        if (timeoutId) clearTimeout(timeoutId);
         this.inFlightRequests.delete(videoId);
       }
     })();
@@ -368,7 +398,9 @@ export class SponsorBlockBase {
       cachedVideosCount: this.cache.size,
       skipCount: this.skipCount,
       lastSkipped: this.lastSkipped,
-      circuitBreakerTripped: this.circuitCooldownUntil > Date.now()
+      circuitBreakerTripped: this.circuitCooldownUntil > Date.now(),
+      fallbackUsed: Boolean(this.fallbackUsed),
+      fallbackUsedCount: this.fallbackUsedCount || 0
     };
   }
 }

@@ -86,6 +86,117 @@ try {
     Assert-E2E ($settled.pipButtonVisible -and $settled.pipButtonBetweenCaptionsAndSettings) 'floating-control-exactly-between-cc-and-settings'
     Assert-E2E ($settled.currentTime -gt $restart.currentTime) 'playback-continues-after-cinema-restore'
 
+    # HiDPI font rendering & comment layout probe verification
+    Write-Host 'Verifying HiDPI layout, font rendering, and comment styles...'
+    $layout = Read-Json 'hidpi-layout-probe.json'
+    Assert-E2E ($layout.stylesInjected -eq $true) 'hidpi-ui-styles-injected'
+    Assert-E2E ($layout.devicePixelRatio -ge 1) 'hidpi-device-pixel-ratio-valid'
+    Assert-E2E ($layout.pipBetweenCaptionsAndSettings -eq $true) 'pip-controls-aligned-between-cc-and-settings'
+
+    # AdBlock, SponsorBlock, and DeArrow feature verification on hosted Windows runner
+    Write-Host 'Verifying AdBlock, SponsorBlock, and DeArrow features on hosted Windows runner...'
+    $features = Read-Json 'features-probe.json'
+    Assert-E2E ($features.adblock.loaded -eq $true) 'adblock-module-loaded'
+    Assert-E2E ($features.adblock.enabled -eq $true) 'adblock-enabled-by-default'
+    Assert-E2E ($features.adblock.stylesheetInjected -eq $true) 'adblock-cosmetic-stylesheet-injected'
+    Assert-E2E ($features.sponsorblock.loaded -eq $true) 'sponsorblock-module-loaded'
+    Assert-E2E ($features.sponsorblock.enabled -eq $true) 'sponsorblock-enabled-by-default'
+    Assert-E2E ($features.sponsorblock.autoSkip -eq $true) 'sponsorblock-autoskip-enabled'
+    Assert-E2E ($features.sponsorblock.categoriesConfigured -eq $true) 'sponsorblock-categories-configured'
+    Assert-E2E ($features.dearrow.loaded -eq $true) 'dearrow-module-loaded'
+    Assert-E2E ($features.dearrow.enabled -eq $true) 'dearrow-enabled-by-default'
+
+    # Process-tree CPU and private RAM metrics collection & validation
+    Write-Host 'Collecting and verifying process-tree CPU and private RAM metrics...'
+    $telemetryScenarios = @('floating', 'theater-user-choice', 'theater-restart')
+    $allProcesses = [ordered]@{}
+    $totalPeakWsMb = 0.0
+    $totalPeakPrivMb = 0.0
+    $totalCpuTimeMs = 0.0
+
+    foreach ($sc in $telemetryScenarios) {
+        $tFileName = "$sc-telemetry.json"
+        $tData = Read-Json $tFileName
+        Assert-E2E ($tData.summary.totalPrivateMemoryBytes -gt 0) "process-tree-private-ram-positive:$sc"
+        Assert-E2E ($tData.summary.totalWorkingSetBytes -gt 0) "process-tree-working-set-positive:$sc"
+        Assert-E2E ($tData.processes.Count -ge 1) "process-tree-processes-enumerated:$sc"
+
+        if ($tData.summary.totalWorkingSetMb -gt $totalPeakWsMb) {
+            $totalPeakWsMb = [double]$tData.summary.totalWorkingSetMb
+        }
+        if ($tData.summary.totalPrivateMemoryMb -gt $totalPeakPrivMb) {
+            $totalPeakPrivMb = [double]$tData.summary.totalPrivateMemoryMb
+        }
+
+        foreach ($p in $tData.processes) {
+            $pidKey = $p.pid.ToString()
+            if (-not $allProcesses.Contains($pidKey)) {
+                $allProcesses[$pidKey] = [ordered]@{
+                    pid = $p.pid
+                    name = $p.name
+                    role = $p.role
+                    peakWorkingSetMb = [double]$p.workingSetMb
+                    peakPrivateMemoryMb = [double]$p.privateMemoryMb
+                    cpuTimeMs = [double]$p.cpuTimeMs
+                }
+            } else {
+                if ([double]$p.workingSetMb -gt $allProcesses[$pidKey].peakWorkingSetMb) {
+                    $allProcesses[$pidKey].peakWorkingSetMb = [double]$p.workingSetMb
+                }
+                if ([double]$p.privateMemoryMb -gt $allProcesses[$pidKey].peakPrivateMemoryMb) {
+                    $allProcesses[$pidKey].peakPrivateMemoryMb = [double]$p.privateMemoryMb
+                }
+                if ([double]$p.cpuTimeMs -gt $allProcesses[$pidKey].cpuTimeMs) {
+                    $allProcesses[$pidKey].cpuTimeMs = [double]$p.cpuTimeMs
+                }
+            }
+            $totalCpuTimeMs += [double]$p.cpuTimeMs
+        }
+    }
+
+    $perfMetrics = [ordered]@{
+        timestamp = [DateTime]::UtcNow.ToString('o')
+        environment = 'github-actions-windows-latest'
+        scenarios = $telemetryScenarios
+        summary = [ordered]@{
+            peakWorkingSetMb = [Math]::Round($totalPeakWsMb, 2)
+            peakPrivateMemoryMb = [Math]::Round($totalPeakPrivMb, 2)
+            trackedProcessCount = $allProcesses.Count
+            totalCpuTimeMs = [Math]::Round($totalCpuTimeMs, 1)
+        }
+        processes = @($allProcesses.Values)
+    }
+
+    $perfMetricsJsonPath = Join-Path $dir 'process-tree-performance-metrics.json'
+    $perfMetrics | ConvertTo-Json -Depth 6 | Set-Content $perfMetricsJsonPath -Encoding utf8
+    Assert-E2E (Test-Path $perfMetricsJsonPath) 'artifact:process-tree-performance-metrics.json'
+
+    $summaryLines = @(
+        "==================================================",
+        "  TizenTube Windows - Process Performance Summary",
+        "==================================================",
+        "Environment:          github-actions-windows-latest",
+        "Timestamp:            $($perfMetrics.timestamp)",
+        "Peak Working Set:     $($perfMetrics.summary.peakWorkingSetMb) MB",
+        "Peak Private Memory:  $($perfMetrics.summary.peakPrivateMemoryMb) MB",
+        "Tracked Processes:    $($perfMetrics.summary.trackedProcessCount)",
+        "Total CPU Time:       $($perfMetrics.summary.totalCpuTimeMs) ms",
+        "--------------------------------------------------",
+        "Processes:"
+    )
+    foreach ($proc in $allProcesses.Values) {
+        $summaryLines += "  PID $($proc.pid) [$($proc.role)] $($proc.name): Private=$($proc.peakPrivateMemoryMb)MB, WS=$($proc.peakWorkingSetMb)MB, CPU=$($proc.cpuTimeMs)ms"
+    }
+    $summaryLines += "=================================================="
+    $summaryTxtPath = Join-Path $dir 'process-tree-performance-summary.txt'
+    $summaryLines | Set-Content $summaryTxtPath -Encoding utf8
+    Assert-E2E (Test-Path $summaryTxtPath) 'artifact:process-tree-performance-summary.txt'
+
+    Assert-E2E ($perfMetrics.summary.peakPrivateMemoryMb -gt 0) 'performance-private-ram-metric-positive'
+    Assert-E2E ($perfMetrics.summary.peakWorkingSetMb -gt 0) 'performance-working-set-metric-positive'
+    Assert-E2E ($perfMetrics.summary.trackedProcessCount -ge 1) 'performance-process-tree-metrics-collected'
+    Assert-E2E ($perfMetrics.summary.totalCpuTimeMs -ge 0) 'performance-total-cpu-time-tracked'
+
     $success = [ordered]@{ status = 'PASS'; source = $env:GITHUB_SHA; runner = $env:RUNNER_OS; checks = $checks }
     $success | ConvertTo-Json -Depth 6 | Set-Content (Join-Path $dir 'results.json') -Encoding utf8
     Write-Host "Windows guest-only experience E2E PASS: $($checks.Count) checks"

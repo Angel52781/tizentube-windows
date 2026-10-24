@@ -60,6 +60,188 @@
 .ytp-right-controls #tizentube-native-pip.ytp-button:hover { color: #eee; }
 
 /* ============================================================================
+   HiDPI Font Rendering, Text Clarity & Comment Layout Engine
+   Ensures crisp typography across high-DPI displays (125%, 150%, 200%)
+   and resolves Chromium compositing subpixel blur and comment spacing on YouTube desktop.
+   ============================================================================ */
+
+/* Global text clarity and font smoothing across YouTube desktop */
+html,
+body,
+ytd-app,
+#content,
+#primary,
+#secondary,
+#columns {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Prevent subpixel layer blur from unwanted GPU transforms on watch metadata */
+ytd-watch-metadata #title,
+ytd-watch-metadata #description,
+ytd-text-inline-expander,
+#meta-contents,
+#info-contents {
+  transform: none !important;
+  will-change: auto !important;
+  backface-visibility: visible !important;
+}
+
+/* Eliminate compositing subpixel blur in comments section */
+ytd-comments,
+#comments,
+#sections.ytd-comments,
+#contents.ytd-item-section-renderer,
+ytd-comment-thread-renderer,
+ytd-comment-view-model,
+ytd-comment-renderer,
+#body.ytd-comment-view-model,
+#body.ytd-comment-renderer,
+#main.ytd-comment-view-model,
+#main.ytd-comment-renderer,
+#content.ytd-comment-view-model,
+#content.ytd-comment-renderer,
+#content-text.ytd-comment-view-model,
+#content-text.ytd-comment-renderer,
+ytd-expander#expander {
+  transform: none !important;
+  will-change: auto !important;
+  backface-visibility: visible !important;
+  filter: none !important;
+}
+
+/* Comment text clarity, kerning, and crisp line rendering */
+#content-text.ytd-comment-view-model,
+#content-text.ytd-comment-renderer,
+yt-attributed-string#content-text,
+.yt-core-attributed-string {
+  font-family: "Roboto", "Arial", sans-serif;
+  font-size: 1.4rem !important;
+  line-height: 2.0rem !important;
+  letter-spacing: 0.01em;
+  font-feature-settings: "kern" 1;
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  color: var(--yt-spec-text-primary, #f1f1f1) !important;
+}
+
+/* Author avatar sharpness and contrast optimization on HiDPI displays */
+#author-thumbnail.ytd-comment-view-model yt-img-shadow,
+#author-thumbnail.ytd-comment-renderer yt-img-shadow,
+#author-thumbnail.ytd-comment-view-model img,
+#author-thumbnail.ytd-comment-renderer img,
+.yt-spec-avatar-shape img {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  border-radius: 50% !important;
+}
+
+/* Spacing between top-level comment threads */
+ytd-comment-thread-renderer {
+  margin-bottom: 16px !important;
+  display: block !important;
+}
+
+/* Uniform horizontal alignment between avatar and comment main column */
+#body.ytd-comment-view-model,
+#body.ytd-comment-renderer {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: flex-start !important;
+  gap: 16px !important;
+}
+
+#author-thumbnail.ytd-comment-view-model,
+#author-thumbnail.ytd-comment-renderer {
+  flex-shrink: 0 !important;
+  width: 40px !important;
+  height: 40px !important;
+  margin-right: 0 !important;
+}
+
+#main.ytd-comment-view-model,
+#main.ytd-comment-renderer {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+/* Comment author header baseline and spacing */
+#header-author {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: baseline !important;
+  gap: 8px !important;
+  margin-bottom: 4px !important;
+  flex-wrap: wrap !important;
+}
+
+#header-author #author-text {
+  margin-right: 0 !important;
+  font-size: 1.3rem !important;
+  font-weight: 500 !important;
+  line-height: 1.8rem !important;
+  color: var(--yt-spec-text-primary, #f1f1f1) !important;
+}
+
+#header-author #published-time-text {
+  margin-right: 0 !important;
+  font-size: 1.2rem !important;
+  line-height: 1.8rem !important;
+  color: var(--yt-spec-text-secondary, #aaaaaa) !important;
+}
+
+#header-author #author-comment-badge {
+  margin: 0 !important;
+  align-self: center !important;
+}
+
+/* Comment action buttons alignment and spacing */
+#action-buttons.ytd-comment-view-model,
+#action-buttons.ytd-comment-renderer {
+  margin-top: 4px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+/* Clean indentation for replies matching avatar + gap (40px + 16px = 56px) */
+#replies.ytd-comment-thread-renderer,
+ytd-comment-replies-renderer {
+  margin-left: 56px !important;
+  margin-top: 8px !important;
+}
+
+#replies ytd-comment-view-model #author-thumbnail,
+#replies ytd-comment-renderer #author-thumbnail {
+  width: 24px !important;
+  height: 24px !important;
+}
+
+#replies ytd-comment-view-model #body,
+#replies ytd-comment-renderer #body {
+  gap: 12px !important;
+}
+
+/* Comments header spacing */
+ytd-comments-header-renderer {
+  margin-bottom: 24px !important;
+}
+
+#title.ytd-comments-header-renderer {
+  display: flex !important;
+  align-items: center !important;
+  gap: 24px !important;
+}
+
+/* ============================================================================
    Common Button & Form Styles
    ============================================================================ */
 .tt-btn {

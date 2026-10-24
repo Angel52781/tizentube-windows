@@ -13,6 +13,7 @@ export class DeArrowBase {
     this.options = {
       enabled: true,
       apiUrl: 'https://dearrow-thumb.ajay.app/api/v1',
+      fallbackApiUrls: [],
       replaceThumbnails: true,
       replaceTitles: true,
       timeoutMs: 4000,
@@ -27,6 +28,8 @@ export class DeArrowBase {
     this.inFlightRequests = new Map();
     this.pendingIds = new Set();
     this.replacementsApplied = 0;
+    this.fallbackUsed = false;
+    this.fallbackUsedCount = 0;
     this.observer = null;
     this.batchTimeout = null;
 
@@ -40,11 +43,16 @@ export class DeArrowBase {
    * @param {boolean} enabled 
    */
   setEnabled(enabled) {
+    const prev = this.options.enabled;
     this.options.enabled = Boolean(enabled);
     if (!this.options.enabled) {
       this.stopDomObserver();
+      this.restoreOriginals();
     } else {
       this.startDomObserver();
+      if (!prev) {
+        this.applyToDom();
+      }
     }
   }
 
@@ -52,7 +60,19 @@ export class DeArrowBase {
    * Updates feature flags.
    */
   setOptions(newOpts = {}) {
+    const prevTitles = this.options.replaceTitles;
+    const prevThumbs = this.options.replaceThumbnails;
     Object.assign(this.options, newOpts);
+
+    if (prevTitles && !this.options.replaceTitles) {
+      this.restoreOriginalTitles();
+    }
+    if (prevThumbs && !this.options.replaceThumbnails) {
+      this.restoreOriginalThumbnails();
+    }
+    if (this.options.enabled && (this.options.replaceTitles || this.options.replaceThumbnails)) {
+      this.applyToDom();
+    }
   }
 
   /**
@@ -105,69 +125,90 @@ export class DeArrowBase {
         continue;
       }
 
-      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      const timeoutMs = this.options.timeoutMs || 4000;
-      const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
-
       const chunkPromise = (async () => {
-        try {
-          const url = `${this.options.apiUrl}/branding?videoIDs=${encodeURIComponent(JSON.stringify(chunk))}`;
-          const res = await fetch(url, {
-            headers: { 'Accept': 'application/json' },
-            signal: controller ? controller.signal : undefined
-          });
+        const urlsToTry = [
+          this.options.apiUrl,
+          ...(Array.isArray(this.options.fallbackApiUrls) ? this.options.fallbackApiUrls : [])
+        ];
 
-          if (!res.ok) {
-            if (res.status === 404) {
-              return;
-            }
-            if (res.status === 429) {
-              this.consecutiveFailures = this.options.circuitBreakerThreshold;
-              this.circuitCooldownUntil = Date.now() + Math.max(60000, this.options.circuitCooldownMs * 2);
-              return;
-            }
-            throw new Error(`HTTP ${res.status}`);
-          }
+        for (let i = 0; i < urlsToTry.length; i++) {
+          const baseUrl = urlsToTry[i];
+          const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+          const timeoutMs = this.options.timeoutMs || 4000;
+          const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
 
-          let data;
           try {
-            data = await res.json();
-          } catch (jsonErr) {
-            throw new Error(`Malformed JSON response from DeArrow: ${jsonErr.message}`);
-          }
+            const url = `${baseUrl}/branding?videoIDs=${encodeURIComponent(JSON.stringify(chunk))}`;
+            const res = await fetch(url, {
+              headers: { 'Accept': 'application/json' },
+              signal: controller ? controller.signal : undefined
+            });
 
-          if (Array.isArray(data)) {
-            for (const item of data) {
-              if (item && item.videoID) {
-                const titleObj = Array.isArray(item.titles) ? item.titles.find(t => !t.locked) || item.titles[0] : null;
-                const thumbObj = Array.isArray(item.thumbnails) ? item.thumbnails.find(t => !t.locked) || item.thumbnails[0] : null;
+            if (!res.ok) {
+              if (res.status === 404) {
+                return;
+              }
+              if (res.status === 429) {
+                this.consecutiveFailures = this.options.circuitBreakerThreshold;
+                this.circuitCooldownUntil = Date.now() + Math.max(60000, this.options.circuitCooldownMs * 2);
+                return;
+              }
+              throw new Error(`HTTP ${res.status}`);
+            }
 
-                this.setCacheItem(item.videoID, {
-                  videoID: item.videoID,
-                  title: titleObj?.title || null,
-                  thumbnail: thumbObj?.timestamp ? `${this.options.apiUrl}/thumbnail?videoID=${item.videoID}&time=${thumbObj.timestamp}` : null,
-                  original: item
-                });
+            let data;
+            try {
+              data = await res.json();
+            } catch (jsonErr) {
+              throw new Error(`Malformed JSON response from DeArrow: ${jsonErr.message}`);
+            }
+
+            if (Array.isArray(data)) {
+              for (const item of data) {
+                if (item && item.videoID) {
+                  const titleObj = Array.isArray(item.titles) ? item.titles.find(t => !t.locked) || item.titles[0] : null;
+                  const thumbObj = Array.isArray(item.thumbnails) ? item.thumbnails.find(t => !t.locked) || item.thumbnails[0] : null;
+
+                  this.setCacheItem(item.videoID, {
+                    videoID: item.videoID,
+                    title: titleObj?.title || null,
+                    thumbnail: thumbObj?.timestamp ? `${baseUrl}/thumbnail?videoID=${item.videoID}&time=${thumbObj.timestamp}` : null,
+                    original: item
+                  });
+                }
               }
             }
-          }
 
-          this.consecutiveFailures = 0;
-          this.circuitCooldownUntil = 0;
-        } catch (err) {
-          this.consecutiveFailures++;
-          if (this.consecutiveFailures >= this.options.circuitBreakerThreshold) {
-            this.circuitCooldownUntil = Date.now() + this.options.circuitCooldownMs;
+            this.consecutiveFailures = 0;
+            this.circuitCooldownUntil = 0;
+            this.fallbackUsed = (baseUrl !== this.options.apiUrl);
+            if (this.fallbackUsed) {
+              this.fallbackUsedCount = (this.fallbackUsedCount || 0) + 1;
+              console.info(`[DeArrow] Fallback mirror succeeded using ${baseUrl}`);
+            }
+            return;
+          } catch (err) {
+            if (i < urlsToTry.length - 1) {
+              console.warn(`[DeArrow] Query to ${baseUrl} failed, trying fallback mirror:`, err.message);
+              continue;
+            }
+            this.consecutiveFailures++;
+            if (this.consecutiveFailures >= this.options.circuitBreakerThreshold) {
+              this.circuitCooldownUntil = Date.now() + this.options.circuitCooldownMs;
+            }
+            console.warn('[DeArrow] API query failed (fail-open):', err.message);
+          } finally {
+            if (timeoutId) clearTimeout(timeoutId);
           }
-          console.warn('[DeArrow] API query failed (fail-open):', err.message);
-        } finally {
-          if (timeoutId) clearTimeout(timeoutId);
-          this.inFlightRequests.delete(chunkKey);
         }
       })();
 
       this.inFlightRequests.set(chunkKey, chunkPromise);
-      await chunkPromise;
+      try {
+        await chunkPromise;
+      } finally {
+        this.inFlightRequests.delete(chunkKey);
+      }
     }
 
     return this.getCached(ids);
@@ -220,7 +261,7 @@ export class DeArrowBase {
 
     // Discover video renderers (YouTube desktop, mobile, TV)
     const videoCards = rootElement.querySelectorAll(
-      'ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, yt-lockup-view-model'
+      'ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, yt-lockup-view-model, ytd-playlist-video-renderer, ytd-reel-item-renderer'
     );
 
     const idsToFetch = [];
@@ -316,6 +357,62 @@ export class DeArrowBase {
     }
   }
 
+  /**
+   * Restores original titles and thumbnails across all modified elements in rootElement.
+   * @param {HTMLElement} [rootElement]
+   */
+  restoreOriginals(rootElement = typeof document !== 'undefined' ? document : null) {
+    this.restoreOriginalTitles(rootElement);
+    this.restoreOriginalThumbnails(rootElement);
+  }
+
+  /**
+   * Restores original titles from data-original-title attribute.
+   * @param {HTMLElement} [rootElement]
+   */
+  restoreOriginalTitles(rootElement = typeof document !== 'undefined' ? document : null) {
+    if (!rootElement || typeof rootElement.querySelectorAll !== 'function') return;
+    const elements = rootElement.querySelectorAll('[data-original-title]');
+    elements.forEach(el => {
+      const orig = el.getAttribute('data-original-title');
+      if (orig !== null) {
+        el.textContent = orig;
+        el.title = orig;
+        el.removeAttribute('data-original-title');
+      }
+    });
+    const cards = rootElement.querySelectorAll('[data-dearrow-processed]');
+    cards.forEach(c => {
+      if (!c.querySelector?.('[data-original-src]')) {
+        if (typeof c.removeAttribute === 'function') c.removeAttribute('data-dearrow-processed');
+        if (c.dataset) delete c.dataset.dearrowProcessed;
+      }
+    });
+  }
+
+  /**
+   * Restores original thumbnail URLs from data-original-src attribute.
+   * @param {HTMLElement} [rootElement]
+   */
+  restoreOriginalThumbnails(rootElement = typeof document !== 'undefined' ? document : null) {
+    if (!rootElement || typeof rootElement.querySelectorAll !== 'function') return;
+    const elements = rootElement.querySelectorAll('[data-original-src]');
+    elements.forEach(el => {
+      const orig = el.getAttribute('data-original-src');
+      if (orig !== null) {
+        el.src = orig;
+        el.removeAttribute('data-original-src');
+      }
+    });
+    const cards = rootElement.querySelectorAll('[data-dearrow-processed]');
+    cards.forEach(c => {
+      if (!c.querySelector?.('[data-original-title]')) {
+        if (typeof c.removeAttribute === 'function') c.removeAttribute('data-dearrow-processed');
+        if (c.dataset) delete c.dataset.dearrowProcessed;
+      }
+    });
+  }
+
   getStats() {
     return {
       enabled: this.options.enabled,
@@ -323,7 +420,9 @@ export class DeArrowBase {
       replaceThumbnails: this.options.replaceThumbnails,
       cachedCount: this.cache.size,
       replacementsApplied: this.replacementsApplied,
-      circuitBreakerTripped: this.circuitCooldownUntil > Date.now()
+      circuitBreakerTripped: this.circuitCooldownUntil > Date.now(),
+      fallbackUsed: Boolean(this.fallbackUsed),
+      fallbackUsedCount: this.fallbackUsedCount || 0
     };
   }
 }

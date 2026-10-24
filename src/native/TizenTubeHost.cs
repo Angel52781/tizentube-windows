@@ -159,9 +159,19 @@ namespace TizenTubeWindows
 
     public class Program
     {
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
+        private static readonly IntPtr DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = (IntPtr)(-4);
+
         [STAThread]
         public static int Main(string[] args)
         {
+            try
+            {
+                SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+            }
+            catch { }
+
             var options = HostOptions.Parse(args);
             if (options.ShowHelp)
             {
@@ -423,7 +433,10 @@ namespace TizenTubeWindows
                     // Allow Chromium to throttle idle/background tabs: no
                     // background video should force a renderer to busy-loop.
                     "--enable-gpu-rasterization " +
-                    "--enable-zero-copy";
+                    "--enable-zero-copy " +
+                    "--high-dpi-support=1 " +
+                    "--enable-font-antialiasing " +
+                    "--force-color-profile=srgb";
 
                 var envOptions = new CoreWebView2EnvironmentOptions(chromiumArgs);
                 var env = await CoreWebView2Environment.CreateAsync(null, appDataDir, envOptions);
@@ -939,6 +952,57 @@ namespace TizenTubeWindows
                                 "window.__ttFloating?.diagnostics() || null"));
                         File.WriteAllText(Path.Combine(folder, "theater-restore-count.txt"),
                             Interlocked.Read(ref nativeTheaterRestored).ToString());
+
+                        string layoutProbeScript = "(() => { " +
+                            "const style = document.getElementById('tizentube-ui-styles'); " +
+                            "const comments = document.querySelector('ytd-comments, #comments'); " +
+                            "const pip = document.getElementById('tizentube-native-pip'); " +
+                            "const cc = document.querySelector('.ytp-subtitles-button'); " +
+                            "const set = document.querySelector('.ytp-settings-button'); " +
+                            "return { " +
+                            "  stylesInjected: !!style, " +
+                            "  devicePixelRatio: window.devicePixelRatio || 1, " +
+                            "  commentsElementFound: !!comments, " +
+                            "  pipVisible: pip ? window.getComputedStyle(pip).display !== 'none' : false, " +
+                            "  pipBetweenCaptionsAndSettings: (pip && cc && set) ? " +
+                            "    ((pip.compareDocumentPosition(set) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0 && " +
+                            "     (cc.compareDocumentPosition(pip) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) : true " +
+                            "}; })()";
+                        File.WriteAllText(Path.Combine(folder, "hidpi-layout-probe.json"),
+                            await webView.CoreWebView2.ExecuteScriptAsync(layoutProbeScript));
+
+                        string featuresProbeScript = "(() => { " +
+                            "const l = window.__TIZENTUBE_LOADER__; " +
+                            "const ad = l?.adblock; " +
+                            "const sb = l?.sponsorblock; " +
+                            "const da = l?.dearrow; " +
+                            "const adStyle = document.getElementById('tizentube-adblock-styles'); " +
+                            "const uiStyle = document.getElementById('tizentube-ui-styles'); " +
+                            "return { " +
+                            "  adblock: { " +
+                            "    loaded: Boolean(ad), " +
+                            "    enabled: Boolean(ad && ad.options && ad.options.enabled === true), " +
+                            "    stylesheetInjected: Boolean(adStyle), " +
+                            "    rulesCount: (adStyle && adStyle.sheet && adStyle.sheet.cssRules) ? adStyle.sheet.cssRules.length : 0 " +
+                            "  }, " +
+                            "  sponsorblock: { " +
+                            "    loaded: Boolean(sb), " +
+                            "    enabled: Boolean(sb && sb.options && sb.options.enabled === true), " +
+                            "    autoSkip: Boolean(sb && sb.options && sb.options.autoSkip === true), " +
+                            "    categoriesConfigured: Boolean(sb && sb.options && Array.isArray(sb.options.categories) && sb.options.categories.length > 0) " +
+                            "  }, " +
+                            "  dearrow: { " +
+                            "    loaded: Boolean(da), " +
+                            "    enabled: Boolean(da && da.options && da.options.enabled === true) " +
+                            "  }, " +
+                            "  hidpi: { " +
+                            "    stylesInjected: Boolean(uiStyle), " +
+                            "    devicePixelRatio: window.devicePixelRatio || 1, " +
+                            "    fontSmoothingConfigured: Boolean(uiStyle) " +
+                            "  } " +
+                            "}; })()";
+                        File.WriteAllText(Path.Combine(folder, "features-probe.json"),
+                            await webView.CoreWebView2.ExecuteScriptAsync(featuresProbeScript));
                     }
                 }
                 string persisted = File.Exists(theaterPreferenceFile)

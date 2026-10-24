@@ -385,7 +385,305 @@ async function runFaultToleranceTests() {
   });
 
   // =========================================================================
-  // 4. PlaybackEngine Media Controls & Shortcuts Tests
+  // 4. Extended Fallback, DOM Restoration & International Tests
+  // =========================================================================
+
+  await itAsync('SponsorBlock fails over to fallback mirror when primary API is unavailable', async () => {
+    const urlsHit = [];
+    mockFetchHandler = async (url) => {
+      urlsHit.push(url);
+      if (url.startsWith('https://primary.sponsor.test')) {
+        throw new Error('503 Service Unavailable');
+      }
+      if (url.startsWith('https://mirror1.sponsor.test')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            { category: 'sponsor', segment: [12.0, 34.0], UUID: 'fallback-seg-1' }
+          ]
+        };
+      }
+      throw new Error('Unknown mirror');
+    };
+
+    const sb = new SponsorBlockBase({
+      apiUrl: 'https://primary.sponsor.test/api',
+      fallbackApiUrls: ['https://mirror1.sponsor.test/api']
+    });
+
+    const segments = await sb.fetchSegments('vid-fallback-test');
+    assert.strictEqual(segments.length, 1);
+    assert.strictEqual(segments[0].uuid, 'fallback-seg-1');
+    assert.strictEqual(sb.fallbackUsed, true);
+    assert.strictEqual(sb.fallbackUsedCount, 1);
+    assert.strictEqual(sb.consecutiveFailures, 0);
+    assert.strictEqual(urlsHit.length, 2);
+  });
+
+  await itAsync('SponsorBlock exhausts all mirrors before tripping circuit breaker', async () => {
+    let callCount = 0;
+    mockFetchHandler = async () => {
+      callCount++;
+      throw new Error('Connection refused');
+    };
+
+    const sb = new SponsorBlockBase({
+      apiUrl: 'https://primary.sponsor.test/api',
+      fallbackApiUrls: ['https://mirror1.sponsor.test/api', 'https://mirror2.sponsor.test/api'],
+      circuitBreakerThreshold: 2
+    });
+
+    // Attempt 1: tries primary + 2 mirrors = 3 calls
+    const res1 = await sb.fetchSegments('fail-vid-1');
+    assert.deepStrictEqual(res1, []);
+    assert.strictEqual(callCount, 3);
+    assert.strictEqual(sb.consecutiveFailures, 1);
+
+    // Attempt 2: tries primary + 2 mirrors = 3 more calls (total 6), trips breaker
+    const res2 = await sb.fetchSegments('fail-vid-2');
+    assert.deepStrictEqual(res2, []);
+    assert.strictEqual(callCount, 6);
+    assert.strictEqual(sb.consecutiveFailures, 2);
+    assert(sb.circuitCooldownUntil > Date.now());
+
+    // Attempt 3: during cooldown, returns immediately without network calls
+    const res3 = await sb.fetchSegments('fail-vid-3');
+    assert.deepStrictEqual(res3, []);
+    assert.strictEqual(callCount, 6);
+  });
+
+  it('SponsorBlock toggle settings dynamically affect segments and timeline markers', () => {
+    const sb = new SponsorBlockBase({
+      autoSkip: true,
+      categories: ['sponsor', 'intro']
+    });
+
+    sb.currentVideoId = 'vid-toggle';
+    sb.currentSegments = [
+      { category: 'sponsor', segment: [10, 30], start: 10, end: 30, uuid: 's1', color: '#00d400', categoryName: 'Sponsor' },
+      { category: 'intro', segment: [0, 5], start: 0, end: 5, uuid: 'i1', color: '#00ffff', categoryName: 'Intro' }
+    ];
+
+    // Auto-skip enabled: should skip to 30
+    assert.strictEqual(sb.checkSkip(15), 30);
+
+    // Toggle autoSkip to false: checkSkip returns null (markers still available)
+    sb.setAutoSkip(false);
+    sb.resetSegmentSkip('s1');
+    assert.strictEqual(sb.checkSkip(15), null);
+
+    // Timeline markers still compute
+    let markers = sb.getTimelineMarkers(100);
+    assert.strictEqual(markers.length, 2);
+
+    // Category filter updated to only 'intro'
+    sb.setCategories(['intro']);
+    markers = sb.getTimelineMarkers(100);
+    assert.strictEqual(markers.length, 1);
+    assert.strictEqual(markers[0].category, 'intro');
+
+    // Toggle disabled entirely
+    sb.setEnabled(false);
+    assert.strictEqual(sb.currentSegments.length, 0);
+    assert.deepStrictEqual(sb.getTimelineMarkers(100), []);
+  });
+
+  await itAsync('DeArrow fails over to fallback mirror when primary API fails', async () => {
+    const urlsHit = [];
+    mockFetchHandler = async (url) => {
+      urlsHit.push(url);
+      if (url.startsWith('https://primary.dearrow.test')) {
+        throw new Error('503 Service Unavailable');
+      }
+      if (url.startsWith('https://fallback.dearrow.test')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              videoID: 'vid-da-fallback',
+              titles: [{ title: 'Honest Title from Fallback Mirror', locked: true }],
+              thumbnails: [{ timestamp: 15.0, locked: false }]
+            }
+          ]
+        };
+      }
+      throw new Error('Unknown URL');
+    };
+
+    const da = new DeArrowBase({
+      apiUrl: 'https://primary.dearrow.test/api/v1',
+      fallbackApiUrls: ['https://fallback.dearrow.test/api/v1']
+    });
+
+    const branding = await da.fetchBranding(['vid-da-fallback']);
+    assert(branding['vid-da-fallback']);
+    assert.strictEqual(branding['vid-da-fallback'].title, 'Honest Title from Fallback Mirror');
+    assert.strictEqual(da.fallbackUsed, true);
+    assert.strictEqual(da.fallbackUsedCount, 1);
+    assert.strictEqual(urlsHit.length, 2);
+  });
+
+  await itAsync('DeArrow restores original DOM titles and thumbnails when disabled or toggles off', async () => {
+    const da = new DeArrowBase({ replaceTitles: true, replaceThumbnails: true });
+    da.cache.set('dQw4w9WgXcQ', {
+      videoID: 'dQw4w9WgXcQ',
+      title: 'Clean DeArrow Title',
+      thumbnail: 'https://dearrow.test/thumb.jpg'
+    });
+
+    // Mock DOM elements
+    const mockTitle = {
+      textContent: 'SHOCKING Video Title! Must Watch!!!',
+      title: 'SHOCKING Video Title! Must Watch!!!',
+      attributes: new Map(),
+      setAttribute(k, v) { this.attributes.set(k, v); },
+      getAttribute(k) { return this.attributes.get(k) || null; },
+      removeAttribute(k) { this.attributes.delete(k); }
+    };
+
+    const mockImg = {
+      src: 'https://youtube.com/clickbait.jpg',
+      attributes: new Map(),
+      setAttribute(k, v) { this.attributes.set(k, v); },
+      getAttribute(k) { return this.attributes.get(k) || null; },
+      removeAttribute(k) { this.attributes.delete(k); }
+    };
+
+    const mockLink = {
+      href: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+    };
+
+    const mockCard = {
+      dataset: {},
+      attributes: new Map(),
+      setAttribute(k, v) { this.attributes.set(k, v); },
+      getAttribute(k) { return this.attributes.get(k) || null; },
+      removeAttribute(k) { this.attributes.delete(k); },
+      querySelector(selector) {
+        if (selector.includes('watch?v=')) return mockLink;
+        if (selector.includes('#video-title')) return mockTitle;
+        if (selector.includes('img')) return mockImg;
+        return null;
+      }
+    };
+
+    const mockRoot = {
+      querySelectorAll(selector) {
+        if (selector.includes('ytd-rich-item-renderer')) return [mockCard];
+        if (selector.includes('[data-original-title]')) {
+          return mockTitle.attributes.has('data-original-title') ? [mockTitle] : [];
+        }
+        if (selector.includes('[data-original-src]')) {
+          return mockImg.attributes.has('data-original-src') ? [mockImg] : [];
+        }
+        if (selector.includes('[data-dearrow-processed]')) {
+          return mockCard.dataset.dearrowProcessed ? [mockCard] : [];
+        }
+        return [];
+      }
+    };
+
+    // Apply DeArrow
+    await da.applyToDom(mockRoot);
+    assert.strictEqual(mockTitle.textContent, 'Clean DeArrow Title');
+    assert.strictEqual(mockTitle.getAttribute('data-original-title'), 'SHOCKING Video Title! Must Watch!!!');
+    assert.strictEqual(mockImg.src, 'https://dearrow.test/thumb.jpg');
+    assert.strictEqual(mockImg.getAttribute('data-original-src'), 'https://youtube.com/clickbait.jpg');
+    assert.strictEqual(mockCard.dataset.dearrowProcessed, 'true');
+
+    // Restore originals
+    da.restoreOriginals(mockRoot);
+    assert.strictEqual(mockTitle.textContent, 'SHOCKING Video Title! Must Watch!!!');
+    assert.strictEqual(mockTitle.getAttribute('data-original-title'), null);
+    assert.strictEqual(mockImg.src, 'https://youtube.com/clickbait.jpg');
+    assert.strictEqual(mockImg.getAttribute('data-original-src'), null);
+  });
+
+  it('AdBlock cleans desktop watch next results (twoColumnWatchNextResults) sidebar ads', () => {
+    const ab = new AdBlockBase();
+    const mockWatchPayload = {
+      contents: {
+        twoColumnWatchNextResults: {
+          secondaryResults: {
+            secondaryResults: {
+              results: [
+                { compactVideoRenderer: { title: 'Legitimate Related Video 1' } },
+                { compactPromotedVideoRenderer: { id: 'promoted-ad-1' } },
+                { adSlotRenderer: { id: 'sidebar-ad-slot' } },
+                { actionCompanionAdRenderer: { id: 'companion-ad' } },
+                { compactVideoRenderer: { title: 'Legitimate Related Video 2' } }
+              ]
+            }
+          }
+        }
+      }
+    };
+
+    ab.cleanAdData(mockWatchPayload);
+
+    const remaining = mockWatchPayload.contents.twoColumnWatchNextResults.secondaryResults.secondaryResults.results;
+    assert.strictEqual(remaining.length, 2);
+    assert.strictEqual(remaining[0].compactVideoRenderer.title, 'Legitimate Related Video 1');
+    assert.strictEqual(remaining[1].compactVideoRenderer.title, 'Legitimate Related Video 2');
+    assert.strictEqual(ab.blockedCount, 3);
+  });
+
+  it('AdBlock detects multilingual sponsored badges and marks cards', () => {
+    const ab = new AdBlockBase();
+
+    function createMockCard(badgeText, ariaLabel = null) {
+      const card = {
+        attributes: new Map(),
+        setAttribute(k, v) { this.attributes.set(k, String(v)); },
+        getAttribute(k) { return this.attributes.get(k) || null; },
+        querySelector() { return null; },
+        querySelectorAll(sel) {
+          if (sel.includes('badge')) {
+            return [{
+              textContent: badgeText,
+              getAttribute(k) { return k === 'aria-label' ? ariaLabel : null; }
+            }];
+          }
+          return [];
+        }
+      };
+      return card;
+    }
+
+    const spanishCard = createMockCard('Patrocinado');
+    const frenchCard = createMockCard('Sponsorisé');
+    const germanCard = createMockCard('Gesponsert');
+    const japaneseCard = createMockCard('スポンサー');
+    const normalCard = createMockCard('4K');
+
+    const origDoc = globalThis.document;
+    globalThis.document = {
+      querySelectorAll(sel) {
+        if (sel.includes('ytd-ad-slot-renderer')) return [];
+        if (sel.includes('ytd-rich-item-renderer')) {
+          return [spanishCard, frenchCard, germanCard, japaneseCard, normalCard];
+        }
+        return [];
+      }
+    };
+
+    try {
+      ab.scanSponsoredCards();
+
+      assert.strictEqual(spanishCard.getAttribute('data-tizentube-sponsored'), 'true');
+      assert.strictEqual(frenchCard.getAttribute('data-tizentube-sponsored'), 'true');
+      assert.strictEqual(germanCard.getAttribute('data-tizentube-sponsored'), 'true');
+      assert.strictEqual(japaneseCard.getAttribute('data-tizentube-sponsored'), 'true');
+      assert.strictEqual(normalCard.getAttribute('data-tizentube-sponsored'), null);
+    } finally {
+      globalThis.document = origDoc;
+    }
+  });
+
+  // =========================================================================
+  // 5. PlaybackEngine Media Controls & Shortcuts Tests
   // =========================================================================
 
   it('PlaybackEngine attaches MediaSession handlers when supported', () => {

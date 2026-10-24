@@ -363,6 +363,9 @@ exit 1
     # Copy C# host source and .csproj for native build
     shutil.copy(root_dir / "src" / "native" / "TizenTubeHost.cs", dist_dir / "TizenTubeHost.cs")
     shutil.copy(root_dir / "src" / "native" / "TizenTubeWindows.csproj", dist_dir / "TizenTubeWindows.csproj")
+    manifest_src = root_dir / "src" / "native" / "app.manifest"
+    if manifest_src.exists():
+        shutil.copy(manifest_src, dist_dir / "app.manifest")
 
     # Copy GPL-3.0 License
     license_src = root_dir / "LICENSE"

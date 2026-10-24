@@ -28,7 +28,10 @@
       "--disable-background-timer-throttling",
       "--disable-renderer-backgrounding",
       "--enable-gpu-rasterization",
-      "--enable-zero-copy"
+      "--enable-zero-copy",
+      "--high-dpi-support=1",
+      "--enable-font-antialiasing",
+      "--force-color-profile=srgb"
     ]
   },
   "features": {
@@ -41,6 +44,10 @@
     "sponsorblock": {
       "enabled": true,
       "apiUrl": "https://sponsor.ajay.app/api",
+      "fallbackApiUrls": [
+        "https://api.sponsor.ajay.app/api",
+        "https://sponsorblock.kavin.rocks/api"
+      ],
       "autoSkip": true,
       "categories": [
         "sponsor",
@@ -54,6 +61,10 @@
     "dearrow": {
       "enabled": true,
       "apiUrl": "https://dearrow-thumb.ajay.app/api/v1",
+      "fallbackApiUrls": [
+        "https://dearrow.ajay.app/api/v1",
+        "https://api.dearrow.ajay.app/api/v1"
+      ],
       "replaceThumbnails": true,
       "replaceTitles": true
     },

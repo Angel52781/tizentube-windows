@@ -9,6 +9,8 @@
     <RootNamespace>TizenTubeWindows</RootNamespace>
     <AssemblyName>TizenTubeHost</AssemblyName>
     <ApplicationIcon>../../assets/TizenTube.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <Nullable>disable</Nullable>
     <Deterministic>true</Deterministic>
     <Version>0.1.0</Version>

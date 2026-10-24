@@ -1203,6 +1203,7 @@ class SponsorBlockBase {
     this.options = {
       enabled: true,
       apiUrl: 'https://sponsor.ajay.app/api',
+      fallbackApiUrls: [],
       categories: ['sponsor', 'intro', 'outro', 'selfpromo', 'interaction'],
       autoSkip: true,
       showNotice: true,
@@ -1218,6 +1219,8 @@ class SponsorBlockBase {
     this.skipCount = 0;
     this.lastSkipped = null;
     this.alreadySkippedSegments = new Set();
+    this.fallbackUsed = false;
+    this.fallbackUsedCount = 0;
 
     // Resilient bounded caching & deduplication to minimize network overhead and memory
     this.cache = new Map(); // videoId -> Array<Segment>
@@ -1233,8 +1236,13 @@ class SponsorBlockBase {
    * @param {boolean} enabled 
    */
   setEnabled(enabled) {
+    const prev = this.options.enabled;
     this.options.enabled = Boolean(enabled);
-    if (!this.options.enabled) this.currentSegments = [];
+    if (!this.options.enabled) {
+      this.currentSegments = [];
+    } else if (!prev && this.currentVideoId && !this.currentSegments.length) {
+      void this.setVideo(this.currentVideoId);
+    }
   }
 
   /**
@@ -1309,80 +1317,102 @@ class SponsorBlockBase {
     }
 
     const fetchPromise = (async () => {
-      if (typeof fetch === 'undefined') return [];
-
-      const catsParam = encodeURIComponent(JSON.stringify(this.options.categories));
-      const url = `${this.options.apiUrl}/skipSegments?videoID=${encodeURIComponent(videoId)}&categories=${catsParam}`;
-
-      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      const timeoutMs = this.options.timeoutMs || 4000;
-      const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
-
       try {
-        const res = await fetch(url, {
-          headers: { 'Accept': 'application/json' },
-          signal: controller ? controller.signal : undefined
-        });
+        if (typeof fetch === 'undefined') return [];
 
-        if (!res.ok) {
-          if (res.status === 404) {
-            // No segments exist for this video - cache empty array to avoid redundant queries
-            this.setCache(videoId, []);
+        const catsParam = encodeURIComponent(JSON.stringify(this.options.categories));
+        const urlsToTry = [
+          this.options.apiUrl,
+          ...(Array.isArray(this.options.fallbackApiUrls) ? this.options.fallbackApiUrls : [])
+        ];
+
+        for (let i = 0; i < urlsToTry.length; i++) {
+          const baseUrl = urlsToTry[i];
+          const url = `${baseUrl}/skipSegments?videoID=${encodeURIComponent(videoId)}&categories=${catsParam}`;
+
+          const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+          const timeoutMs = this.options.timeoutMs || 4000;
+          const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+          try {
+            const res = await fetch(url, {
+              headers: { 'Accept': 'application/json' },
+              signal: controller ? controller.signal : undefined
+            });
+
+            if (!res.ok) {
+              if (res.status === 404) {
+                // No segments exist for this video - cache empty array to avoid redundant queries
+                this.setCache(videoId, []);
+                this.consecutiveFailures = 0;
+                return [];
+              }
+              if (res.status === 429) {
+                // Rate limit encountered: trip circuit breaker with longer backoff
+                this.consecutiveFailures = this.options.circuitBreakerThreshold;
+                this.circuitCooldownUntil = Date.now() + Math.max(60000, this.options.circuitCooldownMs * 2);
+                return [];
+              }
+              throw new Error(`HTTP ${res.status}`);
+            }
+
+            let data;
+            try {
+              data = await res.json();
+            } catch (jsonErr) {
+              throw new Error(`Malformed JSON response: ${jsonErr.message}`);
+            }
+
+            if (!Array.isArray(data)) {
+              this.setCache(videoId, []);
+              return [];
+            }
+
+            const segments = data
+              .filter(item => Array.isArray(item.segment) && item.segment.length === 2 && !isNaN(item.segment[0]) && !isNaN(item.segment[1]))
+              .map(item => {
+                const catInfo = SPONSORBLOCK_CATEGORIES[item.category] || {
+                  color: '#00d400',
+                  name: item.category || 'Segment'
+                };
+                return {
+                  category: item.category,
+                  categoryName: catInfo.name,
+                  color: catInfo.color,
+                  start: Math.max(0, item.segment[0]),
+                  end: Math.max(0, item.segment[1]),
+                  segment: [Math.max(0, item.segment[0]), Math.max(0, item.segment[1])],
+                  uuid: item.UUID || `${item.category}_${item.segment[0]}`
+                };
+              });
+
+            this.setCache(videoId, segments);
             this.consecutiveFailures = 0;
+            this.circuitCooldownUntil = 0;
+            this.fallbackUsed = (baseUrl !== this.options.apiUrl);
+            if (this.fallbackUsed) {
+              this.fallbackUsedCount = (this.fallbackUsedCount || 0) + 1;
+              console.info(`[SponsorBlock] Fallback mirror succeeded for ${videoId} using ${baseUrl}`);
+            }
+            return segments;
+          } catch (err) {
+            // If we have remaining fallback URLs to attempt, try next mirror
+            if (i < urlsToTry.length - 1) {
+              console.warn(`[SponsorBlock] Query to ${baseUrl} failed for ${videoId}, attempting fallback mirror:`, err.message);
+              continue;
+            }
+            this.consecutiveFailures++;
+            if (this.consecutiveFailures >= this.options.circuitBreakerThreshold) {
+              this.circuitCooldownUntil = Date.now() + this.options.circuitCooldownMs;
+            }
+            console.warn(`[SponsorBlock] Query failed for ${videoId} (fail-open):`, err.message);
             return [];
+          } finally {
+            if (timeoutId) clearTimeout(timeoutId);
           }
-          if (res.status === 429) {
-            // Rate limit encountered: trip circuit breaker with longer backoff
-            this.consecutiveFailures = this.options.circuitBreakerThreshold;
-            this.circuitCooldownUntil = Date.now() + Math.max(60000, this.options.circuitCooldownMs * 2);
-            return [];
-          }
-          throw new Error(`HTTP ${res.status}`);
         }
-
-        let data;
-        try {
-          data = await res.json();
-        } catch (jsonErr) {
-          throw new Error(`Malformed JSON response: ${jsonErr.message}`);
-        }
-
-        if (!Array.isArray(data)) {
-          this.setCache(videoId, []);
-          return [];
-        }
-
-        const segments = data
-          .filter(item => Array.isArray(item.segment) && item.segment.length === 2 && !isNaN(item.segment[0]) && !isNaN(item.segment[1]))
-          .map(item => {
-            const catInfo = SPONSORBLOCK_CATEGORIES[item.category] || {
-              color: '#00d400',
-              name: item.category || 'Segment'
-            };
-            return {
-              category: item.category,
-              categoryName: catInfo.name,
-              color: catInfo.color,
-              start: Math.max(0, item.segment[0]),
-              end: Math.max(0, item.segment[1]),
-              segment: [Math.max(0, item.segment[0]), Math.max(0, item.segment[1])],
-              uuid: item.UUID || `${item.category}_${item.segment[0]}`
-            };
-          });
-
-        this.setCache(videoId, segments);
-        this.consecutiveFailures = 0;
-        this.circuitCooldownUntil = 0;
-        return segments;
-      } catch (err) {
-        this.consecutiveFailures++;
-        if (this.consecutiveFailures >= this.options.circuitBreakerThreshold) {
-          this.circuitCooldownUntil = Date.now() + this.options.circuitCooldownMs;
-        }
-        console.warn(`[SponsorBlock] Query failed for ${videoId} (fail-open):`, err.message);
         return [];
       } finally {
-        if (timeoutId) clearTimeout(timeoutId);
         this.inFlightRequests.delete(videoId);
       }
     })();
@@ -1519,7 +1549,9 @@ class SponsorBlockBase {
       cachedVideosCount: this.cache.size,
       skipCount: this.skipCount,
       lastSkipped: this.lastSkipped,
-      circuitBreakerTripped: this.circuitCooldownUntil > Date.now()
+      circuitBreakerTripped: this.circuitCooldownUntil > Date.now(),
+      fallbackUsed: Boolean(this.fallbackUsed),
+      fallbackUsedCount: this.fallbackUsedCount || 0
     };
   }
 }
@@ -1539,6 +1571,7 @@ class DeArrowBase {
     this.options = {
       enabled: true,
       apiUrl: 'https://dearrow-thumb.ajay.app/api/v1',
+      fallbackApiUrls: [],
       replaceThumbnails: true,
       replaceTitles: true,
       timeoutMs: 4000,
@@ -1553,6 +1586,8 @@ class DeArrowBase {
     this.inFlightRequests = new Map();
     this.pendingIds = new Set();
     this.replacementsApplied = 0;
+    this.fallbackUsed = false;
+    this.fallbackUsedCount = 0;
     this.observer = null;
     this.batchTimeout = null;
 
@@ -1566,11 +1601,16 @@ class DeArrowBase {
    * @param {boolean} enabled 
    */
   setEnabled(enabled) {
+    const prev = this.options.enabled;
     this.options.enabled = Boolean(enabled);
     if (!this.options.enabled) {
       this.stopDomObserver();
+      this.restoreOriginals();
     } else {
       this.startDomObserver();
+      if (!prev) {
+        this.applyToDom();
+      }
     }
   }
 
@@ -1578,7 +1618,19 @@ class DeArrowBase {
    * Updates feature flags.
    */
   setOptions(newOpts = {}) {
+    const prevTitles = this.options.replaceTitles;
+    const prevThumbs = this.options.replaceThumbnails;
     Object.assign(this.options, newOpts);
+
+    if (prevTitles && !this.options.replaceTitles) {
+      this.restoreOriginalTitles();
+    }
+    if (prevThumbs && !this.options.replaceThumbnails) {
+      this.restoreOriginalThumbnails();
+    }
+    if (this.options.enabled && (this.options.replaceTitles || this.options.replaceThumbnails)) {
+      this.applyToDom();
+    }
   }
 
   /**
@@ -1631,69 +1683,90 @@ class DeArrowBase {
         continue;
       }
 
-      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      const timeoutMs = this.options.timeoutMs || 4000;
-      const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
-
       const chunkPromise = (async () => {
-        try {
-          const url = `${this.options.apiUrl}/branding?videoIDs=${encodeURIComponent(JSON.stringify(chunk))}`;
-          const res = await fetch(url, {
-            headers: { 'Accept': 'application/json' },
-            signal: controller ? controller.signal : undefined
-          });
+        const urlsToTry = [
+          this.options.apiUrl,
+          ...(Array.isArray(this.options.fallbackApiUrls) ? this.options.fallbackApiUrls : [])
+        ];
 
-          if (!res.ok) {
-            if (res.status === 404) {
-              return;
-            }
-            if (res.status === 429) {
-              this.consecutiveFailures = this.options.circuitBreakerThreshold;
-              this.circuitCooldownUntil = Date.now() + Math.max(60000, this.options.circuitCooldownMs * 2);
-              return;
-            }
-            throw new Error(`HTTP ${res.status}`);
-          }
+        for (let i = 0; i < urlsToTry.length; i++) {
+          const baseUrl = urlsToTry[i];
+          const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+          const timeoutMs = this.options.timeoutMs || 4000;
+          const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
 
-          let data;
           try {
-            data = await res.json();
-          } catch (jsonErr) {
-            throw new Error(`Malformed JSON response from DeArrow: ${jsonErr.message}`);
-          }
+            const url = `${baseUrl}/branding?videoIDs=${encodeURIComponent(JSON.stringify(chunk))}`;
+            const res = await fetch(url, {
+              headers: { 'Accept': 'application/json' },
+              signal: controller ? controller.signal : undefined
+            });
 
-          if (Array.isArray(data)) {
-            for (const item of data) {
-              if (item && item.videoID) {
-                const titleObj = Array.isArray(item.titles) ? item.titles.find(t => !t.locked) || item.titles[0] : null;
-                const thumbObj = Array.isArray(item.thumbnails) ? item.thumbnails.find(t => !t.locked) || item.thumbnails[0] : null;
+            if (!res.ok) {
+              if (res.status === 404) {
+                return;
+              }
+              if (res.status === 429) {
+                this.consecutiveFailures = this.options.circuitBreakerThreshold;
+                this.circuitCooldownUntil = Date.now() + Math.max(60000, this.options.circuitCooldownMs * 2);
+                return;
+              }
+              throw new Error(`HTTP ${res.status}`);
+            }
 
-                this.setCacheItem(item.videoID, {
-                  videoID: item.videoID,
-                  title: titleObj?.title || null,
-                  thumbnail: thumbObj?.timestamp ? `${this.options.apiUrl}/thumbnail?videoID=${item.videoID}&time=${thumbObj.timestamp}` : null,
-                  original: item
-                });
+            let data;
+            try {
+              data = await res.json();
+            } catch (jsonErr) {
+              throw new Error(`Malformed JSON response from DeArrow: ${jsonErr.message}`);
+            }
+
+            if (Array.isArray(data)) {
+              for (const item of data) {
+                if (item && item.videoID) {
+                  const titleObj = Array.isArray(item.titles) ? item.titles.find(t => !t.locked) || item.titles[0] : null;
+                  const thumbObj = Array.isArray(item.thumbnails) ? item.thumbnails.find(t => !t.locked) || item.thumbnails[0] : null;
+
+                  this.setCacheItem(item.videoID, {
+                    videoID: item.videoID,
+                    title: titleObj?.title || null,
+                    thumbnail: thumbObj?.timestamp ? `${baseUrl}/thumbnail?videoID=${item.videoID}&time=${thumbObj.timestamp}` : null,
+                    original: item
+                  });
+                }
               }
             }
-          }
 
-          this.consecutiveFailures = 0;
-          this.circuitCooldownUntil = 0;
-        } catch (err) {
-          this.consecutiveFailures++;
-          if (this.consecutiveFailures >= this.options.circuitBreakerThreshold) {
-            this.circuitCooldownUntil = Date.now() + this.options.circuitCooldownMs;
+            this.consecutiveFailures = 0;
+            this.circuitCooldownUntil = 0;
+            this.fallbackUsed = (baseUrl !== this.options.apiUrl);
+            if (this.fallbackUsed) {
+              this.fallbackUsedCount = (this.fallbackUsedCount || 0) + 1;
+              console.info(`[DeArrow] Fallback mirror succeeded using ${baseUrl}`);
+            }
+            return;
+          } catch (err) {
+            if (i < urlsToTry.length - 1) {
+              console.warn(`[DeArrow] Query to ${baseUrl} failed, trying fallback mirror:`, err.message);
+              continue;
+            }
+            this.consecutiveFailures++;
+            if (this.consecutiveFailures >= this.options.circuitBreakerThreshold) {
+              this.circuitCooldownUntil = Date.now() + this.options.circuitCooldownMs;
+            }
+            console.warn('[DeArrow] API query failed (fail-open):', err.message);
+          } finally {
+            if (timeoutId) clearTimeout(timeoutId);
           }
-          console.warn('[DeArrow] API query failed (fail-open):', err.message);
-        } finally {
-          if (timeoutId) clearTimeout(timeoutId);
-          this.inFlightRequests.delete(chunkKey);
         }
       })();
 
       this.inFlightRequests.set(chunkKey, chunkPromise);
-      await chunkPromise;
+      try {
+        await chunkPromise;
+      } finally {
+        this.inFlightRequests.delete(chunkKey);
+      }
     }
 
     return this.getCached(ids);
@@ -1746,7 +1819,7 @@ class DeArrowBase {
 
     // Discover video renderers (YouTube desktop, mobile, TV)
     const videoCards = rootElement.querySelectorAll(
-      'ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, yt-lockup-view-model'
+      'ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, yt-lockup-view-model, ytd-playlist-video-renderer, ytd-reel-item-renderer'
     );
 
     const idsToFetch = [];
@@ -1842,6 +1915,62 @@ class DeArrowBase {
     }
   }
 
+  /**
+   * Restores original titles and thumbnails across all modified elements in rootElement.
+   * @param {HTMLElement} [rootElement]
+   */
+  restoreOriginals(rootElement = typeof document !== 'undefined' ? document : null) {
+    this.restoreOriginalTitles(rootElement);
+    this.restoreOriginalThumbnails(rootElement);
+  }
+
+  /**
+   * Restores original titles from data-original-title attribute.
+   * @param {HTMLElement} [rootElement]
+   */
+  restoreOriginalTitles(rootElement = typeof document !== 'undefined' ? document : null) {
+    if (!rootElement || typeof rootElement.querySelectorAll !== 'function') return;
+    const elements = rootElement.querySelectorAll('[data-original-title]');
+    elements.forEach(el => {
+      const orig = el.getAttribute('data-original-title');
+      if (orig !== null) {
+        el.textContent = orig;
+        el.title = orig;
+        el.removeAttribute('data-original-title');
+      }
+    });
+    const cards = rootElement.querySelectorAll('[data-dearrow-processed]');
+    cards.forEach(c => {
+      if (!c.querySelector?.('[data-original-src]')) {
+        if (typeof c.removeAttribute === 'function') c.removeAttribute('data-dearrow-processed');
+        if (c.dataset) delete c.dataset.dearrowProcessed;
+      }
+    });
+  }
+
+  /**
+   * Restores original thumbnail URLs from data-original-src attribute.
+   * @param {HTMLElement} [rootElement]
+   */
+  restoreOriginalThumbnails(rootElement = typeof document !== 'undefined' ? document : null) {
+    if (!rootElement || typeof rootElement.querySelectorAll !== 'function') return;
+    const elements = rootElement.querySelectorAll('[data-original-src]');
+    elements.forEach(el => {
+      const orig = el.getAttribute('data-original-src');
+      if (orig !== null) {
+        el.src = orig;
+        el.removeAttribute('data-original-src');
+      }
+    });
+    const cards = rootElement.querySelectorAll('[data-dearrow-processed]');
+    cards.forEach(c => {
+      if (!c.querySelector?.('[data-original-title]')) {
+        if (typeof c.removeAttribute === 'function') c.removeAttribute('data-dearrow-processed');
+        if (c.dataset) delete c.dataset.dearrowProcessed;
+      }
+    });
+  }
+
   getStats() {
     return {
       enabled: this.options.enabled,
@@ -1849,7 +1978,9 @@ class DeArrowBase {
       replaceThumbnails: this.options.replaceThumbnails,
       cachedCount: this.cache.size,
       replacementsApplied: this.replacementsApplied,
-      circuitBreakerTripped: this.circuitCooldownUntil > Date.now()
+      circuitBreakerTripped: this.circuitCooldownUntil > Date.now(),
+      fallbackUsed: Boolean(this.fallbackUsed),
+      fallbackUsedCount: this.fallbackUsedCount || 0
     };
   }
 }
@@ -2081,10 +2212,11 @@ class AdBlockBase {
       this.cleanAdData(obj.playerResponse);
     }
 
-    // Clean masthead / home feed / search ad slots in browse responses
+    // Clean masthead / home feed / search / watch ad slots in browse & watch responses
     if (obj.contents && typeof obj.contents === 'object') {
       this.cleanBrowseAds(obj.contents);
       this.cleanSearchAds(obj.contents);
+      this.cleanWatchAds(obj.contents);
     }
 
     // Clean continuation browse feeds
@@ -2106,13 +2238,14 @@ class AdBlockBase {
 
   /**
    * Cleans ad renderers from browse/feed responses.
-   * @param {Object} contents 
+   * @param {Object} contents
    */
   cleanBrowseAds(contents) {
     if (!contents) return;
 
     // Desktop tabs: sectionListRenderer and modern richGridRenderer
-    const tabs = contents.twoColumnBrowseResultsRenderer?.tabs;
+    const tabs = contents.twoColumnBrowseResultsRenderer?.tabs
+      || contents.singleColumnBrowseResultsRenderer?.tabs;
     if (Array.isArray(tabs)) {
       for (const tab of tabs) {
         const tabContent = tab?.tabRenderer?.content;
@@ -2130,6 +2263,12 @@ class AdBlockBase {
       }
     }
 
+    // Secondary contents in twoColumnBrowseResultsRenderer
+    if (Array.isArray(contents.twoColumnBrowseResultsRenderer?.secondaryContents?.sectionListRenderer?.contents)) {
+      contents.twoColumnBrowseResultsRenderer.secondaryContents.sectionListRenderer.contents =
+        this.removeSponsoredItems(contents.twoColumnBrowseResultsRenderer.secondaryContents.sectionListRenderer.contents);
+    }
+
     // Mobile / TV sectionListRenderer
     const tvSections = contents.tvBrowseRenderer?.content?.tvSurfaceContentRenderer?.content?.sectionListRenderer?.contents;
     if (Array.isArray(tvSections)) {
@@ -2142,6 +2281,34 @@ class AdBlockBase {
         }
       }
       contents.tvBrowseRenderer.content.tvSurfaceContentRenderer.content.sectionListRenderer.contents = filtered;
+    }
+  }
+
+  /**
+   * Cleans ad slots and sponsored companion items from watch page responses.
+   * Handles twoColumnWatchNextResults and singleColumnWatchNextResults.
+   * @param {Object} contents
+   */
+  cleanWatchAds(contents) {
+    if (!contents) return;
+
+    // Desktop two-column watch next results (secondary sidebar & primary panels)
+    const watchNext = contents.twoColumnWatchNextResults;
+    if (watchNext) {
+      const secondaryResults = watchNext.secondaryResults?.secondaryResults?.results;
+      if (Array.isArray(secondaryResults)) {
+        watchNext.secondaryResults.secondaryResults.results = this.removeSponsoredItems(secondaryResults);
+      }
+      const secondarySectionList = watchNext.secondaryResults?.secondaryResults?.sectionListRenderer?.contents;
+      if (Array.isArray(secondarySectionList)) {
+        watchNext.secondaryResults.secondaryResults.sectionListRenderer.contents = this.removeSponsoredItems(secondarySectionList);
+      }
+    }
+
+    // Single column watch next results (fallback / compact layouts)
+    const singleSections = contents.singleColumnWatchNextResults?.pivot?.sectionListRenderer?.contents;
+    if (Array.isArray(singleSections)) {
+      contents.singleColumnWatchNextResults.pivot.sectionListRenderer.contents = this.removeSponsoredItems(singleSections);
     }
   }
 
@@ -2181,12 +2348,26 @@ class AdBlockBase {
       'adSlotRenderer', 'inFeedAdRenderer', 'displayAdRenderer',
       'promotedVideoRenderer', 'promotedSparklesWebRenderer',
       'videoMastheadAdRenderer', 'videoMastheadAdV3Renderer',
-      'searchPyvRenderer'
+      'videoMastheadAdPrimaryVideoRenderer',
+      'searchPyvRenderer', 'brandVideoSingletonRenderer',
+      'statementBannerRenderer', 'adSlotHeaderRenderer',
+      'compactPromotedVideoRenderer', 'compactPromotedItemRenderer',
+      'actionCompanionAdRenderer'
     ];
     return items.filter(item => {
-      const nested = [item, item?.richItemRenderer?.content,
-        item?.richSectionRenderer?.content, item?.itemSectionRenderer?.content];
-      const sponsored = nested.some(part => part && adKeys.some(key => Object.hasOwn(part, key)));
+      const nested = [
+        item,
+        item?.richItemRenderer?.content,
+        item?.richSectionRenderer?.content,
+        item?.itemSectionRenderer?.content,
+        item?.compactVideoRenderer
+      ];
+      const sponsored = nested.some(part => {
+        if (!part) return false;
+        if (adKeys.some(key => Object.hasOwn(part, key))) return true;
+        if (part?.adClientParams?.isAd === true) return true;
+        return false;
+      });
       if (sponsored) this.blockedCount++;
       return !sponsored;
     });
@@ -2209,10 +2390,21 @@ class AdBlockBase {
       .ytp-ad-overlay-container,
       .ytp-ad-overlay-slot,
       .ytp-ad-image-overlay,
+      .ytp-ad-player-overlay,
+      .ytp-ad-player-overlay-layout,
+      .ytp-ad-message-container,
+      .ytp-ad-progress,
+      .ytp-ad-progress-list,
+      .ytp-ad-overlay-close-button,
       ytd-promoted-sparkles-web-renderer,
       ytd-promoted-video-renderer,
       ytd-display-ad-renderer,
       ytd-compact-promoted-video-renderer,
+      ytd-compact-promoted-item-renderer,
+      ytd-action-companion-ad-renderer,
+      ytd-ad-slot-header-renderer,
+      ytd-statement-banner-renderer,
+      ytd-player-legacy-desktop-watch-ads-renderer,
       ytd-search-pyv-renderer,
       ytd-video-masthead-ad-renderer,
       ytd-video-masthead-ad-v3-renderer,
@@ -2223,6 +2415,9 @@ class AdBlockBase {
       #masthead-ad,
       ytd-companion-slot-renderer,
       ytd-in-feed-ad-layout-renderer,
+      ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-ads"],
+      #panels:has(ytd-ads-engagement-panel-content-renderer),
+      #panels:has(ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-ads"]),
       ytd-rich-item-renderer:has(ytd-ad-slot-renderer),
       ytd-rich-item-renderer:has(ytd-in-feed-ad-layout-renderer),
       ytd-rich-item-renderer:has(ytd-display-ad-renderer),
@@ -2277,8 +2472,8 @@ class AdBlockBase {
       ) || [];
       const adBadge = Array.from(badges).some(badge => {
         const label = String(badge.getAttribute?.('aria-label') || badge.textContent || '')
-          .normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
-        return /^(patrocinad[oa]s?|promocionad[oa]s?|sponsored|promoted|advertisement|publicidad|anuncio|paid promotion|ad)$/.test(label);
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '').normalize('NFC').trim().toLowerCase();
+        return /^(patrocinad[oa]s?|promocionad[oa]s?|sponsored|promoted|advertisement|publicidad|anuncio|paid promotion|ad|sponsoris[eé]e?|publicit[eé]|annonce|gesponsert|anzeige|werbung|sponsorizzato|annuncio|スポンサー|広告)$/i.test(label);
       });
       if (adLink || adBadge) this.markSponsoredCard(card);
     }
@@ -2329,7 +2524,7 @@ class AdBlockBase {
     for (const selector of known) {
       data.counts[selector] = document.querySelectorAll(selector).length;
     }
-    const badgePattern = /^(patrocinad[oa]s?|promocionad[oa]s?|sponsored|promoted|advertisement|publicidad|anuncio|paid promotion|ad)$/i;
+    const badgePattern = /^(patrocinad[oa]s?|promocionad[oa]s?|sponsored|promoted|advertisement|publicidad|anuncio|paid promotion|ad|sponsoris[eé]e?|publicit[eé]|annonce|gesponsert|anzeige|werbung|sponsorizzato|annuncio|スポンサー|広告)$/i;
     const candidates = document.querySelectorAll(
       'span, yt-formatted-string, yt-attributed-string, yt-badge-shape, yt-badge-shape-element'
     );
@@ -2337,7 +2532,7 @@ class AdBlockBase {
       if (data.badgeAncestors.length >= 12) break;
       if (element.children?.length) continue;
       const label = String(element.textContent || '')
-        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '').normalize('NFC').trim();
       if (!badgePattern.test(label)) continue;
       const ancestry = [];
       let node = element;
@@ -2395,7 +2590,11 @@ class AdBlockBase {
         '.ytp-skip-ad-button-modern',
         '.videoAdUiSkipButton',
         'button.ytp-ad-skip-button-modern',
-        'button.ytp-skip-ad-button'
+        'button.ytp-skip-ad-button',
+        '.ytp-ad-skip-button-container button',
+        'button.ytp-ad-skip-button-text',
+        '.ytp-ad-overlay-close-button',
+        '.ytp-ad-overlay-close-container button'
       ];
 
       for (const sel of skipSelectors) {
@@ -2407,9 +2606,11 @@ class AdBlockBase {
         }
       }
 
-      // 2. If video player is marked as showing an ad (.ad-showing), speed through it and mute
+      // 2. If video player is marked as showing an ad (.ad-showing / .ad-interrupting), speed through it and mute
       const player = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
-      const isAdShowing = Boolean(player && player.classList && player.classList.contains('ad-showing'));
+      const isAdShowing = Boolean(player && player.classList && (
+        player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting')
+      ));
       const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
 
       if (isAdShowing) {
