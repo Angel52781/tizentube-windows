@@ -67,6 +67,11 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or !(Test-Path windows-experience-host/TizenTubeHost.exe)) {
             throw 'WINDOWS_EXE_BUILD_FAILED'
           }
+      - name: Verify native Back toolbar and screenshot before playback journey
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File ./scripts/ci_windows_toolbar.ps1 -Executable windows-experience-host/TizenTubeHost.exe -EvidenceDirectory windows-toolbar-evidence
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_NATIVE_TOOLBAR_FAILED' }
       - name: Prove real home feed and two independently playable selected videos
         shell: pwsh
         run: |
@@ -96,6 +101,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-youtube-experience-e2e
-          path: windows-experience-evidence/**
+          path: |
+            windows-experience-evidence/**
+            windows-toolbar-evidence/**
           if-no-files-found: warn
           retention-days: 14
