@@ -2,7 +2,8 @@
 # GPL-3.0-only. Validates P0 cycle: Normal -> Theater -> Floating -> Fullscreen -> Return
 param(
     [Parameter(Mandatory=$true)][string]$Executable,
-    [string]$EvidenceDirectory = 'windows-floating-cycle-evidence'
+    [string]$EvidenceDirectory = 'windows-floating-cycle-evidence',
+    [switch]$OfflineFixture
 )
 $ErrorActionPreference = 'Stop'
 $exe = (Resolve-Path $Executable).Path
@@ -14,6 +15,7 @@ $capture = Join-Path $dir 'floating-cycle-telemetry.json'
 Write-Host ">>> Executing P0 Floating Lifecycle & Surface Transition Validation..." -ForegroundColor Cyan
 
 $arguments = @('--smoke-test', '35', '--url', $url, '--telemetry-file', $capture, '--floating-cycle-probe')
+if ($OfflineFixture) { $arguments += '--floating-fixture-probe' }
 $process = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -ArgumentList $arguments -Wait -PassThru
 
 if ($process.ExitCode -ne 0) {
@@ -43,27 +45,34 @@ $s5 = $summary.step5_return
 # Check if video was able to initialize in this runner
 $videoLoaded = ($s1.readyState -ge 2 -and $s1.videoWidth -gt 0)
 if (-not $videoLoaded) {
+    if ($OfflineFixture) {
+        throw "OFFLINE_WEBVIEW2_FIXTURE_VIDEO_NOT_PLAYING:readyState=$($s1.readyState),videoWidth=$($s1.videoWidth)"
+    }
     Write-Warning "[LIMITATION] YouTube anonymous stream did not initialize video stream in this datacenter runner IP (readyState=$($s1.readyState), videoWidth=$($s1.videoWidth))."
-    $script:checks['youtube-anonymous-datacenter-stream'] = 'BLOCKED_BY_YOUTUBE_IP'
+    $script:checks['youtube-anonymous-datacenter-stream'] = 'NO_VERIFICADO_CAUSA_NO_CONFIRMADA'
 } else {
     Assert-Cycle ($s1.videoWidth -gt 0) 'step1-normal-video-playing'
 }
 
 # Verify lifecycle state transitions
 Assert-Cycle ($s1.floating -eq $false -and $s1.fullscreen -eq $false) 'step1-normal-state-clean'
-Assert-Cycle ($s2.theater -eq $true) 'step2-theater-transition'
-Assert-Cycle ($s3.floating -eq $true -and $s3.playerInBody -eq $true) 'step3-floating-player-in-body'
-Assert-Cycle ($s4.fullscreen -eq $true -and $s4.floating -eq $false -and $s4.playerInBody -eq $false) 'step4-fullscreen-restores-player-from-body'
-Assert-Cycle ($s5.fullscreen -eq $false -and $s5.floating -eq $false -and $s5.playerInBody -eq $false) 'step5-return-player-in-container'
 
 if ($videoLoaded) {
+    Assert-Cycle ($s2.theater -eq $true) 'step2-theater-transition'
+    Assert-Cycle ($s3.floating -eq $true -and $s3.playerInBody -eq $true) 'step3-floating-player-in-body'
+    Assert-Cycle ($s4.fullscreen -eq $true -and $s4.floating -eq $false -and $s4.playerInBody -eq $false) 'step4-fullscreen-restores-player-from-body'
+    Assert-Cycle ($s5.fullscreen -eq $false -and $s5.floating -eq $false -and $s5.playerInBody -eq $false) 'step5-return-player-in-container'
     Assert-Cycle ($s3.videoWidth -gt 0 -and $s4.videoWidth -gt 0) 'video-present-during-floating-and-fullscreen'
     Assert-Cycle ($s5.videoWidth -gt 0) 'step5-return-video-width-valid-no-black-surface'
     Assert-Cycle ($s5.currentTime -gt ($s1.currentTime + 0.5)) 'step5-return-playback-time-advanced'
+} else {
+    Write-Warning "[LIMITATION] YouTube anonymous playback was blocked or unready in CI datacenter runner (videoWidth=$($s1.videoWidth), readyState=$($s1.readyState)). Cause not conclusively determined."
+    $script:checks['media-playback-cycle'] = 'NO_VERIFICADO_CAUSA_NO_CONFIRMADA'
 }
 
 $resultPayload = [ordered]@{
-    status = $(if ($videoLoaded) { 'PASS' } else { 'DOM_ONLY_NO_VIDEO' })
+    status = $(if ($videoLoaded) { $(if ($OfflineFixture) { 'PASS_LOCAL_MEDIA_FIXTURE' } else { 'PASS_YOUTUBE' }) } else { 'NO_VERIFICADO_YOUTUBE' })
+    evidenceType = $(if ($OfflineFixture) { 'LOCAL_GENERATED_CANVAS_STREAM_WEBVIEW2' } else { 'LIVE_YOUTUBE' })
     timestamp = [DateTime]::UtcNow.ToString('o')
     videoLoaded = $videoLoaded
     checks = $checks

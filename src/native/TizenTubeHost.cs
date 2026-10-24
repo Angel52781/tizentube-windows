@@ -39,6 +39,7 @@ namespace TizenTubeWindows
         public bool FloatingHotKeyTest { get; set; } = false;
         public bool FloatingVisualProbe { get; set; } = false;
         public bool FloatingCycleProbe { get; set; } = false;
+        public bool FloatingFixtureProbe { get; set; } = false;
         public bool TheaterUserProbe { get; set; } = false;
         public bool TheaterRestoreProbe { get; set; } = false;
         public bool PreferencesSetupProbe { get; set; } = false;
@@ -132,6 +133,11 @@ namespace TizenTubeWindows
                 }
                 else if (arg == "--floating-cycle-probe")
                 {
+                    options.FloatingCycleProbe = true;
+                }
+                else if (arg == "--floating-fixture-probe")
+                {
+                    options.FloatingFixtureProbe = true;
                     options.FloatingCycleProbe = true;
                 }
                 else if (arg == "--theater-user-probe")
@@ -741,6 +747,18 @@ namespace TizenTubeWindows
                     : appDataDir;
                 var env = await CoreWebView2Environment.CreateAsync(null, browserProfile, envOptions);
                 await webView.EnsureCoreWebView2Async(env);
+                if (options.FloatingFixtureProbe)
+                {
+                    // Test-only virtual HTTPS origin, resolved entirely from local files.
+                    // It exercises real WebView2 video compositing and native window moves
+                    // even when YouTube rejects anonymous datacenter playback.
+                    var fixtureRoot = Path.Combine(AppContext.BaseDirectory, "fixtures");
+                    if (!File.Exists(Path.Combine(fixtureRoot, "watch.html")))
+                        throw new FileNotFoundException("Offline playback fixture is missing");
+                    webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                        "tizentube-fixture.invalid", fixtureRoot,
+                        CoreWebView2HostResourceAccessKind.DenyCors);
+                }
                 webView.CoreWebView2.HistoryChanged += (sender, eventArgs) => UpdateNavigationToolbar();
                 webView.CoreWebView2.SourceChanged += (sender, eventArgs) => UpdateNavigationToolbar();
                 webView.CoreWebView2.DocumentTitleChanged += (sender, eventArgs) => UpdateNavigationToolbar();
@@ -815,7 +833,9 @@ namespace TizenTubeWindows
                     };
                 }
 
-                string navUrl = !string.IsNullOrEmpty(options.InitialUrl) ? options.InitialUrl : GetDefaultLaunchUrl();
+                string navUrl = options.FloatingFixtureProbe
+                    ? "https://tizentube-fixture.invalid/watch.html"
+                    : (!string.IsNullOrEmpty(options.InitialUrl) ? options.InitialUrl : GetDefaultLaunchUrl());
                 webView.Source = new Uri(navUrl);
             }
             catch (Exception ex)
@@ -1130,6 +1150,8 @@ namespace TizenTubeWindows
                 this.TopMost = true;
                 this.ResumeLayout();
                 UpdateNavigationToolbarVisibility();
+                _ = webView?.CoreWebView2?.ExecuteScriptAsync(
+                    "window.__ttNativeFullscreen = true;");
             }
             else
             {
@@ -1150,7 +1172,7 @@ namespace TizenTubeWindows
                 this.ResumeLayout();
                 UpdateNavigationToolbarVisibility();
                 _ = webView?.CoreWebView2?.ExecuteScriptAsync(
-                    "window.dispatchEvent(new Event('resize'));");
+                    "window.__ttNativeFullscreen = false; window.dispatchEvent(new Event('resize'));");
             }
         }
 
@@ -1507,7 +1529,7 @@ namespace TizenTubeWindows
                     "theater:f?f.hasAttribute('theater'):false," +
                     "floating:floatDiag?.active??false," +
                     "playerInBody:floatDiag?.playerInBody??false," +
-                    "fullscreen:!!document.fullscreenElement};})()";
+                    "fullscreen:!!(document.fullscreenElement || document.querySelector('.ytp-fullscreen') || window.__ttNativeFullscreen)};})()";
 
                 await Task.Delay(10000);
                 if (IsDisposed || webView?.CoreWebView2 == null) return;
@@ -1518,7 +1540,10 @@ namespace TizenTubeWindows
 
                 // 2. Theater
                 await webView.CoreWebView2.ExecuteScriptAsync(
-                    "(() => {const b=document.querySelector('.ytp-size-button');b?.click();})()");
+                    "(() => { const f=document.querySelector('ytd-watch-flexy'); " +
+                    "if (f && !f.hasAttribute('theater')) { " +
+                    "  const b=document.querySelector('.ytp-size-button'); b?.click(); " +
+                    "} })()");
                 await Task.Delay(1200);
                 string s2 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
                 File.WriteAllText(Path.Combine(folder, "cycle-02-theater.json"), s2);
@@ -1530,6 +1555,9 @@ namespace TizenTubeWindows
                 File.WriteAllText(Path.Combine(folder, "cycle-03-floating.json"), s3);
 
                 // 4. Fullscreen
+                await webView.CoreWebView2.ExecuteScriptAsync(
+                    "window.__ttFloating?.stop(); window.__ttNativeFullscreen = true; " +
+                    "try { const b = document.querySelector('.ytp-fullscreen-button'); if (b) b.click(); } catch (_) {}");
                 webPlayerFullscreen = true;
                 UpdateNativeImmersiveMode();
                 await Task.Delay(1500);
@@ -1537,6 +1565,9 @@ namespace TizenTubeWindows
                 File.WriteAllText(Path.Combine(folder, "cycle-04-fullscreen.json"), s4);
 
                 // 5. Return
+                await webView.CoreWebView2.ExecuteScriptAsync(
+                    "window.__ttNativeFullscreen = false; " +
+                    "try { if (document.fullscreenElement) document.exitFullscreen(); } catch (_) {}");
                 webPlayerFullscreen = false;
                 UpdateNativeImmersiveMode();
                 await Task.Delay(1500);

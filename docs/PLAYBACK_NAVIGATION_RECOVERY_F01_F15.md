@@ -12,28 +12,68 @@ El análisis estático y dinámico reveló las siguientes causas principales:
 
 1. **Desacoplamiento DOM en transiciones a Fullscreen (F01 / F02)**:
    Al entrar en modo flotante, `#movie_player` se traslada a `document.body` mediante `relocate()` para escapar de contenedores con `overflow:hidden`/`transform`. Sin embargo, `UpdateNativeImmersiveMode()` en `TizenTubeHost.cs` desactivaba la bandera nativa y quitaba la clase CSS `.tt-floating-mode` sin invocar `window.__ttFloating.stop()`. En consecuencia, `#movie_player` permanecía huérfano dentro de `document.body`, perdiendo la capa de renderizado y el estilo geométrico, lo que producía una superficie negra permanente e irrecuperable.
+   - *Solución*: Invocación explícita de `__ttFloating.stop()` antes de la transición inmersiva, sincronización bidireccional de `window.__ttNativeFullscreen`, y retorno garantizado de `#movie_player` a su contenedor de origen (`ytd-watch-flexy #player`).
 2. **Carencia de watchdog de recuperación (F03 / F04)**:
    Si el reproductor YouTube o la capa nativa fallaban o si se alteraba el tamaño interno del player, YouTube conservaba dimensiones inline miniaturizadas (ej. 200x150) o quedaba desalineado. No existía un método `recover()` para restaurar el player a su contenedor de origen y forzar el evento `resize`.
+   - *Solución*: Implementación de `window.__ttFloating.recover()`, que detecta orfandad en `document.body`, restaura estilos, despacha `window.dispatchEvent(new Event('resize'))` y reanuda reproducción si el elemento `<video>` quedó pausado.
 3. **Inconsistencia de chrome en modo flotante (F05 - F10)**:
    El modo flotante cambiaba `FormBorderStyle` a `FormBorderStyle.SizableToolWindow`, lo cual generaba una barra de título blanca de Windows (F06), controles de ventana sobredimensionados (F07), título estático genérico (F10), ausencia de botón visible de retorno/acople a la ventana normal (F09), y controles de reproducción que tapaban el contenido en ventanas compactas (F08).
+   - *Solución*: Mantenimiento de `FormBorderStyle.None` con `NavigationToolbar` integrada oscura en modo flotante, auto-ocultación de controles `.ytp-chrome-bottom:not(:hover)`, escala 0.88, botón visible dedicado `RestoreFloating`, y sincronización continua del título dinámico de la página.
 4. **Parpadeo de inicio, restauración de sesión y modo cine (F11 - F13)**:
-   - F11: El formulario y WebView2 iniciaban sin `DefaultBackgroundColor` oscuro, produciendo un destello blanco/gris antes de que cargara el tema oscuro de YouTube.
-   - F12: El host navegaba inicialmente a `https://www.youtube.com`, mostrando la portada antes de que el script de cliente hiciera `location.replace()` al último vídeo no concluido.
-   - F13: La restauración de modo cine sufría demoras acumuladas de sondeo (3 a 5 s), provocando un salto brusco de layout en la interfaz de usuario.
+   - F11: El formulario y WebView2 iniciaban sin `DefaultBackgroundColor` oscuro, produciendo un destello blanco/gris antes de que cargara el tema oscuro de YouTube. (Corregido asignando `DefaultBackgroundColor = Color.FromArgb(15, 15, 15)` al control WinForms).
+   - F12: El host navegaba inicialmente a `https://www.youtube.com`, mostrando la portada antes de que el script de cliente hiciera `location.replace()` al último vídeo no concluido. (Corregido con `last-video-session.json` en C# para navegar directamente a la URL del vídeo en frío).
+   - F13: La restauración de modo cine sufría demoras acumuladas de sondeo (3 a 5 s), provocando un salto brusco de layout en la interfaz de usuario. (Corregido con sondeo acelerado e invocación inmediata en la primera carga).
 5. **DPI / Franjas en maximizado y Caché de Icono de Windows Explorer (F14 / F15)**:
    - F14: El ajuste de `MaximizedBounds` requería sincronización previa a `WindowState = FormWindowState.Maximized`.
    - F15: El ejecutable compila e incluye el icono con 7 resoluciones embebidas en recursos PE. La divergencia observada en el escritorio correspondía a la caché externa de accesos directos de Windows Explorer (`IconCache.db`), la cual no invalida automáticamente accesos directos `.lnk` existentes cuando se reemplaza el archivo en la misma ruta sin refrescar el shell.
 
 ---
 
-## 2. Matriz de Hallazgos y Evidencia (F01 - F15)
+## 2. Historial de Correcciones en PR #3 (Rama `fix/preview14-playback-navigation-20261024`)
+
+- **Commit `c000aa9`**: Restauración del ciclo de vida del reproductor flotante, implementación de `ci_windows_floating_cycle.ps1`, watchdog de recuperación en `floating_player.js`, aceleración de restauración de cine y sesión.
+- **Commit `e4607f5`**: Corrección sintáctica en `src/native/TizenTubeHost.cs` (eliminación de llave excedente en `CaptureFloatingCycleProbeAsync`).
+- **Commit `04adfef`**: Corrección de API WebView2; eliminación de llamada no soportada `webView.CoreWebView2.DefaultBackgroundColor` en favor de la propiedad directa de WinForms `webView.DefaultBackgroundColor`.
+- **Commit Actual**:
+  - Resiliencia en entornos de solo lectura en `scripts/build_x64.py` (manejo defensivo de sandbox EROFS sin fallar `npm test`).
+  - Sincronización de estado fullscreen nativo y DOM en `UpdateNativeImmersiveMode()` y `CaptureFloatingCycleProbeAsync()` (`window.__ttNativeFullscreen`).
+  - Robustecimiento de `scripts/ci_windows_floating_cycle.ps1` para discriminar honestamente limitaciones de IP anónima en runners de datacenter vs fallos de código.
+  - Fortalecimiento de pruebas de regresión DOM y ciclo en `scripts/test_floating_player.js` (30/30 checks).
+
+### Prueba independiente de conectividad (preparada, pendiente de CI)
+
+Para distinguir el error de YouTube del comportamiento del host nativo, se
+incorpora `src/native/fixtures/watch.html`. Se ejecuta únicamente con la
+opción explícita `--floating-fixture-probe`: WebView2 carga un origen HTTPS
+virtual servido **desde archivos locales** y reproduce un `MediaStream`
+generado con `canvas.captureStream()`. El mismo controlador JS de modo
+flotante mueve el vídeo entre `#player` y `body`; el host realiza las
+transiciones de ventana, mientras los probes comprueban `readyState`,
+`videoWidth` y avance de `currentTime`.
+
+El workflow Windows ejecuta esta prueba **antes** de navegar YouTube. Una
+prueba correcta demostraría continuidad de un flujo local de cuadros y del
+estado nativo/DOM en un Windows real, pero **no demostraría reproducción de
+YouTube, decodificación de un archivo comprimido ni la corrección visual de
+F01/F02 con el reproductor real de YouTube**. Los resultados de GitHub
+Actions posteriores a estos cambios aún no están disponibles al redactar.
+
+Los workflows anteriores compilaban el host pero fallaban en reproducción:
+el E2E no pudo abrir el primer vídeo desde la portada; el control
+`UnmodifiedWebView` alcanzó el vídeo con `readyState=0`, `videoWidth=0`
+y error de reproducción. Esto **no establece por sí solo** que la IP de
+datacenter sea la causa.
+
+---
+
+## 3. Matriz de Hallazgos y Evidencia (F01 - F15)
 
 **Alcance del estado (2026-10-24):** las menciones a **PASS** en la matriz acreditan exclusivamente inspección de código y/o pruebas unitarias locales, no pruebas visuales ni reproducción continua en un equipo Windows. El workflow de Windows modificado todavía no aporta un resultado CI de estos cambios. **F01-F15 permanecen NO VERIFICADOS funcionalmente** hasta disponer de artefactos de ejecución que prueben el comportamiento observable. Los diagnósticos de causa raíz de F05 y F15 incluyen hipótesis de producto/sistema operativo pendientes de contraste.
 
 | ID | Prioridad | Hallazgo Reportado | Reproducción | Causa Confirmada o Hipótesis | Cambios Realizados y Archivos | Prueba Concreta y Evidencia | Veredicto |
 |---|---|---|---|---|---|---|---|
 | **F01** | P0 | Negro al entrar a fullscreen desde flotante | Activar flotante y presionar F11 o fullscreen de YouTube | `UpdateNativeImmersiveMode()` no invocaba `__ttFloating.stop()`; `#movie_player` quedaba en `body` sin estilos | Invocación de `__ttFloating.stop()` antes de fullscreen; restauración a contenedor padre (`TizenTubeHost.cs`, `floating_player.js`) | `node scripts/test_floating_player.js` (local); `ci_windows_floating_cycle.ps1` (pendiente CI) | **PASS** (local DOM); **NO VERIFICADO** (reproducción Windows) |
-| **F02** | P0 | Negro irrecuperable al salir de fullscreen a modo normal | Entrar a fullscreen desde flotante y presionar Esc o F11 | Al salir de fullscreen, `#movie_player` seguía huérfano en `body`, dejando `ytd-watch-flexy` vacío | Retorno garantizado de `#movie_player` al contenedor de watch antes del ciclo y al salir (`floating_player.js`, `TizenTubeHost.cs`) | `test_floating_player.js` (21 checks locales), `ci_windows_floating_cycle.ps1` (pendiente CI) | **PASS** (local DOM); **NO VERIFICADO** (reproducción Windows) |
+| **F02** | P0 | Negro irrecuperable al salir de fullscreen a modo normal | Entrar a fullscreen desde flotante y presionar Esc o F11 | Al salir de fullscreen, `#movie_player` seguía huérfano en `body`, dejando `ytd-watch-flexy` vacío | Retorno garantizado de `#movie_player` al contenedor de watch antes del ciclo y al salir (`floating_player.js`, `TizenTubeHost.cs`) | `test_floating_player.js` (30 checks locales), `ci_windows_floating_cycle.ps1` (pendiente CI) | **PASS** (local DOM); **NO VERIFICADO** (reproducción Windows) |
 | **F03** | P1 | Vídeo miniatura en la esquina tras salir de flotante | Cambiar entre modos repetidamente | Estilos inline de YouTube persistían con dimensiones de ventana pequeña | `stop()` despacha `window.dispatchEvent(new Event('resize'))` y remueve inline overrides (`floating_player.js`) | `test_floating_player.js` | **PASS** |
 | **F04** | P1 | Falta de recuperación ante fallos de capa/player | Player en estado inconsistente o huérfano | No existía rutina de inspección y recuperación de estado | Implementación de `window.__ttFloating.recover()` que reubica player huérfano y reanuda reproducción (`floating_player.js`) | `test_floating_player.js` (recovery check) | **PASS** |
 | **F05** | P2 | Flotante reemplaza ventana principal | Activar botón PiP | Es el contrato intencional del producto (un solo WebView para optimizar RAM), pero faltaba claridad visual | Mantenimiento de ventana única compacta con botón explícito de retorno y título real (`NavigationToolbar.cs`, `TizenTubeHost.cs`) | `test_ui_features.js`, `ci_windows_titlebar.ps1` | **PASS** |
@@ -50,8 +90,10 @@ El análisis estático y dinámico reveló las siguientes causas principales:
 
 ---
 
-## 3. Limitaciones y Distinción de Entornos
+## 4. Limitaciones y Distinción de Entornos
 
 - **Pruebas en GitHub Actions vs PC Física**:
   En runners alojados de GitHub Actions (Azure Datacenter IPs), YouTube con frecuencia bloquea o solicita consentimiento interactivo para sesiones anónimas sin cuenta Google autenticada. En tales escenarios, las comprobaciones de lógica DOM, IPC nativo, ciclo de ventana y toolbar continúan pasando, pero la reproducción de vídeo real (`readyState >= 2`, `videoWidth > 0`) no puede ser afirmada como PASS funcional sin verificación en hardware físico con conexión residencial/autenticada.
   Esta distinción queda formalmente registrada en la columna de veredicto.
+- **Evidencia MP4**:
+  No se dispone del vídeo MP4 de prueba en este entorno de compilación, por lo que las comprobaciones visuales se basan en capturas de pantalla renderizadas y análisis de geometría DOM.

@@ -74,6 +74,11 @@ jobs:
         run: |
           & pwsh -NoProfile -File ./scripts/ci_windows_toolbar.ps1 -Executable windows-experience-host/TizenTubeHost.exe -EvidenceDirectory windows-toolbar-evidence
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_NATIVE_TOOLBAR_FAILED' }
+      - name: Verify offline native WebView2 media during floating/fullscreen lifecycle
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File ./scripts/ci_windows_floating_cycle.ps1 -Executable windows-experience-host/TizenTubeHost.exe -EvidenceDirectory windows-experience-evidence/offline-cycle -OfflineFixture
+          if ($LASTEXITCODE -ne 0) { throw 'OFFLINE_WEBVIEW2_FLOATING_CYCLE_FAILED' }
       - name: Prove real home feed and two independently playable selected videos
         shell: pwsh
         run: |

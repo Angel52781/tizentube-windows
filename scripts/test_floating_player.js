@@ -80,17 +80,32 @@ location.pathname = '/'; video.readyState = 4;
 check(float.start() === false, 'Home feed cannot activate floating window');
 
 // Regression P0 (F01/F02): Cycle Normal -> Theater -> Floating -> Fullscreen -> Return
-location.pathname = '/watch'; video.readyState = 4; video.paused = false;
+location.pathname = '/watch'; video.readyState = 4; video.paused = false; video.currentTime = 100;
 let resizeDispatched = 0;
 window.addEventListener = (evt, fn) => { if (evt === 'resize') resizeDispatched++; };
 check(float.start(), 'Enters floating from normal/theater playback');
 check(player.parentNode === body && float.diagnostics().playerInBody, 'Player attached to body in floating mode');
+check(pipButton.getAttribute('aria-pressed') === 'true', 'Pip button aria-pressed true in floating mode');
 
 // Entering fullscreen while floating invokes stop() to return #movie_player to container
 check(float.stop(), 'Host invokes stop() when transitioning to fullscreen');
 check(player.parentNode === watchParent, 'Player returned to original container before fullscreen');
 check(!documentElement.classList.contains('tt-floating-mode'), 'Floating mode class removed');
+check(pipButton.getAttribute('aria-pressed') === 'false', 'Pip button aria-pressed reset on fullscreen transition');
 check(video.videoWidth === 1280 && video.readyState === 4, 'Video readiness and dimensions preserved');
+check(video.currentTime >= 100, 'Video playback position preserved across fullscreen transition');
+
+// Fullscreen gating: starting floating while in DOM fullscreen must be rejected
+document.fullscreenElement = player;
+check(float.start() === false, 'Cannot start floating mode while already in fullscreen');
+document.fullscreenElement = null;
+
+// Return transition: exiting fullscreen allows re-entering floating smoothly
+video.currentTime = 120;
+check(float.start(), 'Can re-enter floating mode after returning from fullscreen');
+check(player.parentNode === body && float.diagnostics().playerInBody, 'Player re-attached to body on second floating entry');
+check(float.stop(), 'Returns cleanly to normal/theater watch container');
+check(player.parentNode === watchParent, 'Player returned to watch container upon exit');
 
 // Regression F03/F04: Recovery from orphaned body state
 body.appendChild(player); // simulate corrupted or disconnected parent state
@@ -98,9 +113,12 @@ watchParent.isConnected = true;
 document.querySelector = selector => selector === '#movie_player' ? player :
   selector === 'video.html5-main-video' ? video :
   (selector.includes('watch-flexy') || selector.includes('#player')) ? watchParent : null;
+video.paused = true;
+video.play = () => { video.paused = false; return Promise.resolve(); };
 const recovered = float.recover();
 check(player.parentNode === watchParent, 'Watchdog recovery restores player to watch container');
 check(!documentElement.classList.contains('tt-floating-mode'), 'Stale floating classes cleared on recovery');
+check(video.paused === false, 'Watchdog recovery re-triggers playback if paused');
 
 // Idempotent stop()
 check(float.stop() === true, 'Stop is safe and idempotent when called repeatedly');
