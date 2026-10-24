@@ -1358,6 +1358,17 @@ namespace TizenTubeWindows
                         navigationToolbar.Visible;
                     bool nativeToolbarEnabled = navigationToolbar?.BackEnabled == true;
                     bool nativeToolbarClicked = navigationToolbar?.InvokeBackForProbe() == true;
+                    // Windows-native raster proof: catch white HTML-sized controls.
+                    if (navigationToolbar != null && navigationToolbar.Width >= 110)
+                    {
+                        using (var bitmap = new Bitmap(navigationToolbar.Width, navigationToolbar.Height))
+                        {
+                            navigationToolbar.DrawToBitmap(bitmap,
+                                new Rectangle(Point.Empty, bitmap.Size));
+                            bitmap.Save(Path.Combine(folder, "navigation-toolbar.png"),
+                                System.Drawing.Imaging.ImageFormat.Png);
+                        }
+                    }
                     string now = "null";
                     string nativePath = "";
                     // Record initial evidence BEFORE page transition queries.
