@@ -902,6 +902,60 @@ namespace TizenTubeWindows
             finally { ResumeLayout(); }
         }
 
+        private async Task<string> ClickVideoLinkWithTrustedPointerAsync(
+            string selector, string excludeId, string method)
+        {
+            // HTMLElement.click() can update YouTube's SPA URL without ever
+            // initializing its media player. Use a real CDP pointer event,
+            // including viewport hit-testing, as we already do for theater.
+            try
+            {
+                string selectors = System.Text.Json.JsonSerializer.Serialize(selector);
+                string excluded = System.Text.Json.JsonSerializer.Serialize(excludeId ?? "");
+                string script = "(() => {const nodes=[...document.querySelectorAll(" + selectors + ")];" +
+                    "const a=nodes.find(e=>{try{const u=new URL(e.href);" +
+                    "return u.pathname==='/watch' && !!u.searchParams.get('v') && " +
+                    "u.searchParams.get('v')!==" + excluded + "}catch{return false}});" +
+                    "if(!a)return null;a.scrollIntoView({block:'center'});" +
+                    "const r=a.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;" +
+                    "const hit=document.elementFromPoint(x,y);" +
+                    "if(r.width<10||r.height<10||!hit||!(a===hit||a.contains(hit)))return null;" +
+                    "return {id:new URL(a.href).searchParams.get('v'),x,y};})()";
+                string response = await webView.CoreWebView2.ExecuteScriptAsync(script);
+                if (response == "null") return "{\"clicked\":false}";
+                using (var json = System.Text.Json.JsonDocument.Parse(response))
+                {
+                    var item = json.RootElement;
+                    string id = item.GetProperty("id").GetString() ?? "";
+                    double x = item.GetProperty("x").GetDouble();
+                    double y = item.GetProperty("y").GetDouble();
+                    if (id.Length != 11 || x < 0 || y < 0 ||
+                        x >= webView.Width || y >= webView.Height)
+                        return "{\"clicked\":false}";
+                    string move = System.Text.Json.JsonSerializer.Serialize(new {
+                        type = "mouseMoved", x, y });
+                    string press = System.Text.Json.JsonSerializer.Serialize(new {
+                        type = "mousePressed", x, y, button = "left", clickCount = 1 });
+                    string release = System.Text.Json.JsonSerializer.Serialize(new {
+                        type = "mouseReleased", x, y, button = "left", clickCount = 1 });
+                    await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                        "Input.dispatchMouseEvent", move);
+                    await Task.Delay(180);
+                    await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                        "Input.dispatchMouseEvent", press);
+                    await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                        "Input.dispatchMouseEvent", release);
+                    return System.Text.Json.JsonSerializer.Serialize(new {
+                        clicked = true, id, method = "trusted-" + method });
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("[Host Journey Click] " + ex.Message);
+                return "{\"clicked\":false}";
+            }
+        }
+
         private async Task CaptureNavigationPlaybackProbeAsync()
         {
             // Acceptance: start from HOME, click an actual feed thumbnail, play
@@ -922,27 +976,18 @@ namespace TizenTubeWindows
                 File.WriteAllText(Path.Combine(folder, "journey-home.json"),
                     await webView.CoreWebView2.ExecuteScriptAsync(home));
 
-                string firstClick = "(() => {const a=[...document.querySelectorAll(" +
-                    "'ytd-rich-grid-media a#thumbnail,ytd-video-renderer a#video-title')]" +
-                    ".find(x=>x.href && x.href.includes('/watch?v='));" +
-                    "if(!a)return {clicked:false};" +
-                    "const id=new URL(a.href).searchParams.get('v');a.click();" +
-                    "return {clicked:true,id};})()";
-                string firstClickResult = await webView.CoreWebView2.ExecuteScriptAsync(firstClick);
+                string firstClickResult = await ClickVideoLinkWithTrustedPointerAsync(
+                    "ytd-rich-grid-media a#thumbnail,ytd-video-renderer a#video-title", "", "feed");
                 if (firstClickResult.Contains("\"clicked\":false"))
                 {
-                    // Anonymous home feeds can be intentionally empty. Search
-                    // results are a genuine content-discovery surface too.
+                    // A signed-out YouTube home can legitimately contain no
+                    // recommendations. Search still needs to return clickable
+                    // content and a playable video.
                     await webView.CoreWebView2.ExecuteScriptAsync(
                         "location.assign('https://www.youtube.com/results?search_query=big+buck+bunny')");
                     await Task.Delay(12000);
-                    string searchClick = "(() => {const a=[...document.querySelectorAll(" +
-                        "'ytd-video-renderer a#video-title,ytd-video-renderer a#thumbnail')]" +
-                        ".find(x=>x.href && x.href.includes('/watch?v='));" +
-                        "if(!a)return {clicked:false,method:'search'};" +
-                        "const id=new URL(a.href).searchParams.get('v');a.click();" +
-                        "return {clicked:true,id,method:'search'};})()";
-                    firstClickResult = await webView.CoreWebView2.ExecuteScriptAsync(searchClick);
+                    firstClickResult = await ClickVideoLinkWithTrustedPointerAsync(
+                        "ytd-video-renderer a#video-title,ytd-video-renderer a#thumbnail", "", "search");
                 }
                 File.WriteAllText(Path.Combine(folder, "journey-first-click.json"), firstClickResult);
 
@@ -966,37 +1011,24 @@ namespace TizenTubeWindows
                 File.WriteAllText(Path.Combine(folder, "journey-first-after.json"),
                     await webView.CoreWebView2.ExecuteScriptAsync(media));
 
-                string secondClick = "(() => {const current=new URL(location.href).searchParams.get('v');" +
-                    "const a=[...document.querySelectorAll(" +
-                    "'ytd-compact-video-renderer a#thumbnail,ytd-watch-next-secondary-results-renderer a#thumbnail')]" +
-                    ".find(x=>{try{return new URL(x.href).searchParams.get('v')!==current}" +
-                    "catch{return false}});" +
-                    "if(!a)return {clicked:false};" +
-                    "const id=new URL(a.href).searchParams.get('v');a.click();" +
-                    "return {clicked:true,id};})()";
-                string secondClickResult = await webView.CoreWebView2.ExecuteScriptAsync(secondClick);
+                string firstId = "";
+                try
+                {
+                    using (var parsed = System.Text.Json.JsonDocument.Parse(firstClickResult))
+                        firstId = parsed.RootElement.GetProperty("id").GetString() ?? "";
+                }
+                catch { }
+                string secondClickResult = await ClickVideoLinkWithTrustedPointerAsync(
+                    "ytd-compact-video-renderer a#thumbnail,ytd-watch-next-secondary-results-renderer a#thumbnail",
+                    firstId, "related");
                 if (secondClickResult.Contains("\"clicked\":false"))
                 {
-                    // If YouTube does not render watch recommendations, Back
-                    // must take us to discovery, where another organic result
-                    // is available. Do not fabricate a successful navigation.
-                    string firstId = "";
-                    try
-                    {
-                        using (var parsed = System.Text.Json.JsonDocument.Parse(firstClickResult))
-                            firstId = parsed.RootElement.GetProperty("id").GetString() ?? "";
-                    }
-                    catch { }
+                    // Return to discovery and click another *actual* result.
                     await webView.CoreWebView2.ExecuteScriptAsync("history.back()");
                     await Task.Delay(8000);
-                    string other = "(() => {const a=[...document.querySelectorAll(" +
-                        "'ytd-video-renderer a#video-title,ytd-rich-grid-media a#thumbnail')]" +
-                        ".find(x=>{try{const u=new URL(x.href);return u.pathname==='/watch'&&" +
-                        "u.searchParams.get('v')!=='" + firstId + "'}catch{return false}});" +
-                        "if(!a)return {clicked:false,method:'back-to-results'};" +
-                        "const id=new URL(a.href).searchParams.get('v');a.click();" +
-                        "return {clicked:true,id,method:'back-to-results'};})()";
-                    secondClickResult = await webView.CoreWebView2.ExecuteScriptAsync(other);
+                    secondClickResult = await ClickVideoLinkWithTrustedPointerAsync(
+                        "ytd-video-renderer a#video-title,ytd-rich-grid-media a#thumbnail",
+                        firstId, "back-to-results");
                 }
                 File.WriteAllText(Path.Combine(folder, "journey-second-click.json"), secondClickResult);
                 await Task.Delay(15000);
