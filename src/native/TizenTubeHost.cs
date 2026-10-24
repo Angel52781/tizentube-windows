@@ -45,6 +45,7 @@ namespace TizenTubeWindows
         public bool NavigationBackProbe { get; set; } = false;
         public bool KeyboardShortcutsProbe { get; set; } = false;
         public bool NavigationPlaybackProbe { get; set; } = false;
+        public bool UnmodifiedWebViewProbe { get; set; } = false;
 
         public static HostOptions Parse(string[] args)
         {
@@ -138,6 +139,7 @@ namespace TizenTubeWindows
                 else if (arg == "--navigation-back-probe") options.NavigationBackProbe = true;
                 else if (arg == "--keyboard-shortcuts-probe") options.KeyboardShortcutsProbe = true;
                 else if (arg == "--navigation-playback-probe") options.NavigationPlaybackProbe = true;
+                else if (arg == "--unmodified-webview-probe") options.UnmodifiedWebViewProbe = true;
                 else if (arg == "--help" || arg == "-h")
                 {
                     options.ShowHelp = true;
@@ -458,11 +460,14 @@ namespace TizenTubeWindows
                 ConfigureWebViewSettings();
                 SetupFloatingAccelerators();
                 SetupLifecycleDiagnostics();
-                SetupNetworkAdBlocker();
+                // Diagnostic-only unmodified WebView2 isolates whether native
+                // YouTube's playback fails without any of our interception.
+                // Not an undocumented production fallback or a bypass of login.
+                if (!options.UnmodifiedWebViewProbe) SetupNetworkAdBlocker();
                 SetupFullscreenHandling();
                 SetupIpcBridge();
                 SetupAdblockDiagnosticMenu();
-                await InjectModsAsync();
+                if (!options.UnmodifiedWebViewProbe) await InjectModsAsync();
 
                 if (options.FloatingVisualProbe)
                 {
@@ -940,7 +945,9 @@ namespace TizenTubeWindows
                     "return {id,watch:location.pathname==='/watch',readyState:v?.readyState??0," +
                     "width:v?.videoWidth??0,time:v?.currentTime??0,paused:v?.paused??true," +
                     "duration:Number.isFinite(v?.duration)?v.duration:0," +
-                    "error:!!document.querySelector('.ytp-error')};})()";
+                    "error:!!document.querySelector('.ytp-error')," +
+                    "mediaErrorCode:v?.error?.code??null," +
+                    "errorLabel:(document.querySelector('.ytp-error')?.textContent||'').slice(0,160)};})()";
                 // A click can reach /watch with playback paused due autoplay
                 // policies. Trigger the same player play control as a user.
                 await webView.CoreWebView2.ExecuteScriptAsync(
