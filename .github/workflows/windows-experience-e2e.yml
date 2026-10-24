@@ -64,6 +64,7 @@ jobs:
         shell: pwsh
         run: |
           python scripts/build_icon.py
+          python scripts/test_windows_icon.py
           dotnet publish src/native/TizenTubeWindows.csproj -c Release -f net8.0-windows -r win-x64 --self-contained false -o windows-experience-host
           if ($LASTEXITCODE -ne 0 -or !(Test-Path windows-experience-host/TizenTubeHost.exe)) {
             throw 'WINDOWS_EXE_BUILD_FAILED'

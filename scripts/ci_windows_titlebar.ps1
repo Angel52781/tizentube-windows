@@ -14,7 +14,8 @@ if ($process.ExitCode -ne 0) { throw "TITLEBAR_HOST_EXIT_$($process.ExitCode)" }
 $proof=Join-Path $dir 'titlebar-acceptance.json'
 if (!(Test-Path $proof)) { throw 'TITLEBAR_PROOF_MISSING' }
 $result=Get-Content $proof -Raw -Encoding utf8 | ConvertFrom-Json
-if (!$result.oneBar -or !$result.maximized -or !$result.restored -or !$result.minimized -or
+if (!$result.oneBar -or !$result.webviewBelowBar -or !$result.nativeTaskbarMinimize -or
+    !$result.maximized -or !$result.restored -or !$result.minimized -or
     $result.border -ne 'None' -or $result.height -ne 38) {
   throw "TITLEBAR_WINDOW_ACTIONS_FAILED:$($result | ConvertTo-Json -Compress)"
 }
@@ -31,4 +32,4 @@ try {
   # Caption buttons occupy distinct accessible hit targets in rightmost 138px.
   if ($bitmap.GetPixel(($bitmap.Width-23),19).A -eq 0) { throw 'TITLEBAR_CLOSE_BUTTON_MISSING' }
 } finally { $bitmap.Dispose() }
-Write-Host '[PASS] Integrated titlebar: borderless + dark + minimize/maximize/restore + one toolbar'
+Write-Host '[PASS] Integrated titlebar: WebView below chrome, system minimize styles, dark + minimize/maximize/restore'

@@ -50,6 +50,7 @@ jobs:
         run: |
           python scripts/build_icon.py
           if (!(Test-Path assets/TizenTube.ico)) { throw 'APP_ICON_MISSING' }
+          python scripts/test_windows_icon.py
 
       - name: Verify PE32+ reproducible builder and bit-exact determinism
         shell: pwsh

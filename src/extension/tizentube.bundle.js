@@ -757,8 +757,9 @@ class PlaybackEngine {
 class ViewingExperience {
   constructor(playback, options = {}) {
     this.playback = playback;
-    // Never force the last watched video at application start. Resume is opt-in.
-    this.options = { restoreOnLaunch: false, ...options };
+    // User-selected continuity: re-open the last unfinished video at its
+    // last saved timestamp. The session guard prevents redirects on Home.
+    this.options = { restoreOnLaunch: true, ...options };
     this.theaterKey = 'tizentube.theater.v1';
     this.lastKey = 'tizentube.lastVideo.v1';
     this.lastSavedAt = 0;
@@ -847,7 +848,7 @@ class ViewingExperience {
   persistProgress(force = false) {
     if (!this.playback?.videoElement) return;
     const now = Date.now();
-    if (!force && now - this.lastSavedAt < 8000) return;
+    if (!force && now - this.lastSavedAt < 2000) return;
     const id = this.getVideoId();
     const video = this.playback.videoElement;
     // Never store ad positions, livestreams, short previews, or invalid data.

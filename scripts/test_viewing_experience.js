@@ -181,15 +181,13 @@ try {
   check(theaterHandlers.has('click'), false, 'Theater listener cleaned up on dispose');
   check(playback.listeners.has('timeupdate'), false, 'Playback listener detached on dispose');
 
-  // New launch on home (no automatic redirect on normal SPA home visits).
+  // New process on home restores the unfinished video exactly once.
   globalThis.location.pathname = '/';
   globalThis.location.href = 'https://www.youtube.com/';
   const next = new ViewingExperience(null);
-  check(next.restoreLastVideoOnLaunch(), false, 'Fresh launch stays on YouTube homepage by default');
-  const optedIn = new ViewingExperience(null, { restoreOnLaunch: true });
-  check(optedIn.restoreLastVideoOnLaunch(), true, 'Explicit opt-in can resume a saved video');
+  check(next.restoreLastVideoOnLaunch(), true, 'Fresh launch resumes the last unfinished video by default');
   check(redirected, 'https://www.youtube.com/watch?v='+videoId+'&t=156s', 'Resume URL contains saved time');
-  check(optedIn.restoreLastVideoOnLaunch(), false, 'At most one restoration per session');
+  check(next.restoreLastVideoOnLaunch(), false, 'At most one restoration per session');
   check(session.get('tizentube.launchRestoreAttempted'), '1', 'Resume guard set');
   next.dispose();
   local.set(ui.lastKey, JSON.stringify({id:videoId,position:180, duration:1800,updatedAt:Date.now()-100*86400000}));

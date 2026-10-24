@@ -223,6 +223,8 @@ namespace TizenTubeWindows
         private static extern bool ReleaseCapture();
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wparam, IntPtr lparam);
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern int GetWindowLong(IntPtr hwnd, int index);
         private const int WmNcHitTest = 0x0084;
         private const int WmNcLButtonDown = 0x00A1;
         private const int HtClient = 1;
@@ -236,6 +238,21 @@ namespace TizenTubeWindows
         private const int HtBottomLeft = 16;
         private const int HtBottomRight = 17;
         private const int ResizeHitArea = 7;
+        private const int WsSysMenu = 0x00080000;
+        private const int WsMinimizeBox = 0x00020000;
+        private const int WsMaximizeBox = 0x00010000;
+        private const int WsThickFrame = 0x00040000;
+        // Taskbar-click toggling requires a genuine minimizable system window,
+        // even though its top caption is rendered in our own toolbar.
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var cp = base.CreateParams;
+                cp.Style |= WsSysMenu | WsMinimizeBox | WsMaximizeBox | WsThickFrame;
+                return cp;
+            }
+        }
         [DllImport("psapi.dll")]
         private static extern bool EmptyWorkingSet(IntPtr hProcess);
 
@@ -255,6 +272,7 @@ namespace TizenTubeWindows
         private readonly HostOptions options;
         private WebView2 webView;
         private NavigationToolbar navigationToolbar;
+        private TableLayoutPanel chromeLayout;
         private System.Windows.Forms.Timer memoryTrimTimer;
         private System.Windows.Forms.Timer smokeTestTimer;
         private string appDataDir;
@@ -467,9 +485,20 @@ namespace TizenTubeWindows
                     string folder = Path.GetDirectoryName(options.TelemetryFilePath ?? "");
                     if (string.IsNullOrEmpty(folder)) folder = appDataDir;
                     Directory.CreateDirectory(folder);
+                    chromeLayout.PerformLayout();
+                    bool webviewBelowBar = chromeLayout.Controls.Contains(webView) &&
+                        chromeLayout.Controls.Contains(navigationToolbar) &&
+                        chromeLayout.GetRow(webView) == 1 &&
+                        chromeLayout.GetRow(navigationToolbar) == 0 &&
+                        webView.PointToScreen(Point.Empty).Y >=
+                            navigationToolbar.PointToScreen(Point.Empty).Y + navigationToolbar.Height;
+                    int windowStyle = GetWindowLong(Handle, -16);
+                    bool nativeTaskbarMinimize = ShowInTaskbar &&
+                        (windowStyle & (WsSysMenu | WsMinimizeBox)) ==
+                            (WsSysMenu | WsMinimizeBox);
                     bool oneBar = FormBorderStyle == FormBorderStyle.None &&
                         navigationToolbar.Visible && navigationToolbar.Height == 38 &&
-                        Controls.Contains(navigationToolbar);
+                        chromeLayout.Controls.Contains(navigationToolbar);
                     navigationToolbar.InvokeMaximizeForProbe();
                     await Task.Delay(300);
                     bool maximized = WindowState == FormWindowState.Maximized &&
@@ -491,10 +520,12 @@ namespace TizenTubeWindows
                             System.Drawing.Imaging.ImageFormat.Png);
                     }
                     var proof = new { oneBar, maximized, restored, minimized,
+                        webviewBelowBar, nativeTaskbarMinimize,
                         height = navigationToolbar.Height, border = FormBorderStyle.ToString() };
                     File.WriteAllText(Path.Combine(folder, "titlebar-acceptance.json"),
                         System.Text.Json.JsonSerializer.Serialize(proof));
-                    if (!oneBar || !maximized || !restored || !minimized) ExitCode = 12;
+                    if (!oneBar || !webviewBelowBar || !nativeTaskbarMinimize ||
+                        !maximized || !restored || !minimized) ExitCode = 12;
                     Console.WriteLine($"[Titlebar] oneBar={oneBar} maximized={maximized} restored={restored} minimized={minimized}");
                 };
             }
@@ -514,8 +545,9 @@ namespace TizenTubeWindows
                 () => { WindowState = FormWindowState.Minimized; },
                 ToggleNativeMaximize,
                 () => { Close(); });
-            Controls.Add(navigationToolbar);
-            navigationToolbar.BringToFront();
+            navigationToolbar.Dock = DockStyle.Fill;
+            navigationToolbar.Margin = Padding.Empty;
+            chromeLayout.Controls.Add(navigationToolbar, 0, 0);
             navigationToolbar.SetMaximized(WindowState == FormWindowState.Maximized);
             UpdateNavigationToolbarVisibility();
         }
@@ -575,8 +607,15 @@ namespace TizenTubeWindows
 
         private void UpdateNavigationToolbarVisibility()
         {
-            if (navigationToolbar == null || IsDisposed) return;
-            navigationToolbar.Visible = !nativeImmersiveActive && !nativeFloatingActive;
+            if (navigationToolbar == null || chromeLayout == null || IsDisposed) return;
+            bool visible = !nativeImmersiveActive && !nativeFloatingActive;
+            chromeLayout.SuspendLayout();
+            try
+            {
+                chromeLayout.RowStyles[0].Height = visible ? 38 : 0;
+                navigationToolbar.Visible = visible;
+            }
+            finally { chromeLayout.ResumeLayout(true); }
         }
 
         private async void InitializeWebView()
@@ -584,7 +623,18 @@ namespace TizenTubeWindows
             try
             {
                 webView = new WebView2 { Dock = DockStyle.Fill };
-                this.Controls.Add(webView);
+                webView.Margin = Padding.Empty;
+                // A dedicated layout row prevents the native bar from
+                // overlapping YouTube. Fullscreen collapses that row.
+                chromeLayout = new TableLayoutPanel {
+                    Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2,
+                    Margin = Padding.Empty, Padding = Padding.Empty
+                };
+                chromeLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+                chromeLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
+                chromeLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+                this.Controls.Add(chromeLayout);
+                chromeLayout.Controls.Add(webView, 0, 1);
                 // Navigation is host-owned, not injected into YouTube's masthead.
                 SetupNavigationToolbar();
 
@@ -1549,16 +1599,22 @@ namespace TizenTubeWindows
             bool restoringFlagSet = false;
             try
             {
-                // DOM-only theater attribute changes collapse the video to
-                // zero size on real YouTube. Wait until the actual player is
-                // ready, reveal the controls, then click ONLY if hit-testing
-                // identifies the native theater button under that coordinate.
-                await Task.Delay(4900);
-                if (IsDisposed || webView?.CoreWebView2 == null || nativeFloatingActive) return;
-                string buttonPoint = await webView.CoreWebView2.ExecuteScriptAsync(
-                    "(() => {const b=document.querySelector('.ytp-size-button');" +
-                    "if(!b)return null;const r=b.getBoundingClientRect();" +
-                    "return {x:r.left+r.width/2,y:r.top+r.height/2};})()");
+                // Avoid a blind 4.9-second wait: restore at the first usable
+                // video frame with a real, hit-tested click. We cannot mutate
+                // 'theater' prematurely; that collapsed the player in E2E.
+                string buttonPoint = "null";
+                for (int check = 0; check < 32; check++)
+                {
+                    if (IsDisposed || webView?.CoreWebView2 == null || nativeFloatingActive) return;
+                    buttonPoint = await webView.CoreWebView2.ExecuteScriptAsync(
+                        "(() => {const b=document.querySelector('.ytp-size-button');" +
+                        "const v=document.querySelector('video.html5-main-video');" +
+                        "if(!b||!v||v.readyState<2||v.videoWidth<1)return null;" +
+                        "const r=b.getBoundingClientRect();" +
+                        "return r.width>5&&r.height>5?{x:r.left+r.width/2,y:r.top+r.height/2}:null;})()");
+                    if (buttonPoint != "null") break;
+                    await Task.Delay(180);
+                }
                 if (buttonPoint == "null") return;
                 double mouseX, mouseY;
                 using (var point = System.Text.Json.JsonDocument.Parse(buttonPoint))

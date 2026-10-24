@@ -55,6 +55,10 @@ try {
     'Frameless window supports dragging and Windows-native resize hit testing');
   assert.ok(host.includes('ToggleNativeMaximize') && host.includes('MaximizedBounds'),
     'Custom maximize/restore retains Windows taskbar bounds');
+  assert.ok(host.includes('chromeLayout.RowStyles[0].Height = visible ? 38 : 0'),
+    'Chrome reserves 38 px normally and none in fullscreen');
+  assert.ok(host.includes('WsMinimizeBox | WsMaximizeBox | WsThickFrame'),
+    'Windows retains shell taskbar minimize/restore protocol');
   for (const captionAction of ['Minimize', 'Maximize', 'Close']) {
     assert.ok(toolbar.includes('GlyphButton.Kind.' + captionAction),
       captionAction + ' has a real native caption button');
