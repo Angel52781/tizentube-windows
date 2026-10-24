@@ -1,7 +1,8 @@
 # Windows-hosted real navigation acceptance. No direct watch URL or owner PC.
 param(
   [Parameter(Mandatory=$true)][string]$Executable,
-  [string]$EvidenceDirectory='windows-experience-evidence'
+  [string]$EvidenceDirectory='windows-experience-evidence',
+  [switch]$UnmodifiedWebView
 )
 $ErrorActionPreference = 'Stop'
 $exe = (Resolve-Path $Executable).Path
@@ -9,6 +10,7 @@ New-Item -ItemType Directory -Force $EvidenceDirectory | Out-Null
 $dir = (Resolve-Path $EvidenceDirectory).Path
 $arguments = @('--smoke-test','105','--navigation-playback-probe',
   '--telemetry-file',(Join-Path $dir 'journey-telemetry.json'))
+if ($UnmodifiedWebView) { $arguments += '--unmodified-webview-probe' }
 $proc = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -ArgumentList $arguments -Wait -PassThru
 if ($proc.ExitCode -ne 0) { throw "NAVIGATION_PROBE_HOST_EXIT:$($proc.ExitCode)" }
 function Load([string]$name) {
