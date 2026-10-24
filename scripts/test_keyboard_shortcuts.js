@@ -115,6 +115,12 @@ try {
     assert.ok(!event.defaultPrevented, modifier + ' must not be intercepted');
   }
 
+  for (const nativeKey of ['c', 't', 'i', 'T']) {
+    const event = fakeWindow.send(nativeKey);
+    assert.ok(!event.defaultPrevented && !event.stopped,
+      nativeKey + ' must reach native YouTube and the trusted theater listener');
+  }
+
   engine.dispose();
   assert.ok(!fakeWindow.listeners.some(x => x.type === 'keydown' && x.capture),
     'Dispose must remove capture listener with matching capture option');
