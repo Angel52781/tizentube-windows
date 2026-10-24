@@ -984,6 +984,18 @@ namespace TizenTubeWindows
                     await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
                         "Input.dispatchMouseEvent", release);
                     await Task.Delay(520);
+                    // YouTube occasionally ignores its own size-button
+                    // handler during initial player hydration. Reconcile the
+                    // actual ytd-watch-flexy presentation as a fallback. This
+                    // affects ONLY the saved layout, never playback state.
+                    string reconcileScript = "(() => { const f=document.querySelector('ytd-watch-flexy');" +
+                        "if (!f || location.pathname !== '/watch') return false; " +
+                        "const wanted=" + (wanted ? "true" : "false") + ";" +
+                        "if (f.hasAttribute('theater') !== wanted) {" +
+                        " f.toggleAttribute('theater',wanted);" +
+                        " window.dispatchEvent(new Event('resize'));" +
+                        "} return f.hasAttribute('theater') === wanted; })()";
+                    await webView.CoreWebView2.ExecuteScriptAsync(reconcileScript);
                     Interlocked.Increment(ref nativeTheaterRestored);
                 }
             }
