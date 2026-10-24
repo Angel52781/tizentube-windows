@@ -1,4 +1,10 @@
-# Experiencia de reproducción — v0.1.0-preview.7
+# Experiencia de reproducción — v0.1.0-preview.8
+
+## Reproductor flotante nativo (nuevo en preview.8)
+
+`preview.7` escondía el botón PiP cuando `document.pictureInPictureEnabled` era `false`, caso común en WebView2. Ese comportamiento impedía usar la función. Ahora se muestra siempre que exista el reproductor de YouTube en `/watch`. En el host Windows el botón envía IPC `window:toggle-floating`: el **mismo formulario y WebView2** pasan a una ventana compacta de aproximadamente 500 × 317 px, con `TopMost`, marco redimensionable y vídeo ocupando el área visible mediante CSS local. No se inicia un nuevo flujo, pestaña ni navegador, por lo que se conserva la sesión de Google, SponsorBlock y la posición del vídeo. `Ctrl+Shift+P`, el botón original o cerrar la ventana flotante restauran el estado del formulario principal. Fuera del host, el botón utiliza la API Picture-in-Picture de Chromium cuando está disponible.
+
+**Limitación:** la ventana de TizenTube se convierte temporalmente en el reproductor flotante; se pueden usar otras aplicaciones de Windows, pero no navegar al mismo tiempo por TizenTube en otra ventana. Esta solución evita el coste y la fragilidad de un segundo WebView y no depende de `pictureInPictureEnabled`. El CI comprueba apertura, ventana superior y restauración del formulario; la visualización de un vídeo concreto debe probarse en un Windows de usuario.
 
 ## Resultado implementado
 

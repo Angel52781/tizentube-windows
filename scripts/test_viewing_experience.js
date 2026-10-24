@@ -12,13 +12,14 @@ const videoId = 'a1b2C3d4E5f';
 let redirected = null;
 let theaterClicks = 0;
 let nativePipRequests = 0;
+const hostMessages = [];
 const player = { currentTime: 123, duration: 1800, requestPictureInPicture() {
   nativePipRequests++;
   return Promise.resolve();
 }};
 const flexy = { theater: false, hasAttribute(k) { return k === 'theater' && this.theater; } };
 const theaterButton = { click() { flexy.theater = !flexy.theater; theaterClicks++; } };
-const rightControls = { children: [], insertBefore(child) { this.children.push(child); },
+const rightControls = { children: [], insertBefore(child) { this.children.push(child); domElements.set(child.id, child); },
   querySelector() { return { id: 'settings' }; } };
 const domElements = new Map();
 const video = { currentTime: 123, duration: 1800, addEventListener() {}, requestPictureInPicture: player.requestPictureInPicture };
@@ -91,14 +92,30 @@ try {
   const click = button.handlers.get('click');
   click({ stopPropagation() {} });
   check(nativePipRequests, 1, 'Click invokes HTMLVideoElement.requestPictureInPicture');
-  check(button.title, 'Imagen en imagen (ventana nativa)', 'PiP is not another WebView');
+  check(button.title, 'Reproductor flotante · Ctrl+Mayús+P', 'User can identify the floating player shortcut');
   check(ui.mountPipControl(), true, 'Existing PiP control reused');
+  check(rightControls.children.length, 1, 'Repeated mounting does not duplicate floating buttons');
+
+  // WebView2 disables document.pictureInPictureEnabled on some builds. The
+  // floating button MUST remain visible and use the native host fallback.
+  globalThis.document.pictureInPictureEnabled = false;
+  globalThis.window.chrome = { webview: { postMessage: msg => hostMessages.push(msg) } };
+  check(ui.mountPipControl(), true, 'Button remains accessible with Chromium PiP unavailable');
+  check(ui.togglePictureInPicture(), true, 'WebView2 uses same-window native floating mode');
+  check(hostMessages.at(-1).channel, 'window:toggle-floating', 'Only explicit native PiP IPC is sent');
+  check(nativePipRequests, 1, 'WebView2 path does not duplicate video playback with browser PiP');
+  click({ stopPropagation() {} });
+  check(hostMessages.length, 2, 'Button click toggles floating mode even with browser PiP disabled');
 
   ui.mount();
   check(events.has('pagehide'), true, 'Crash/close resume checkpoint on pagehide');
+  check(events.has('keydown'), true, 'Floating window shortcut registered');
+  events.get('keydown')({ ctrlKey: true, shiftKey: true, code: 'KeyP', repeat: false, preventDefault() {} });
+  check(hostMessages.length, 3, 'Ctrl Shift P triggers native floating action');
   check(playback.listeners.has('timeupdate'), true, 'Progress listener connected');
   ui.dispose();
   check(events.has('pagehide'), false, 'Window listeners detached on dispose');
+  check(events.has('keydown'), false, 'Floating shortcut is removed on dispose');
   check(playback.listeners.has('timeupdate'), false, 'Playback listener detached on dispose');
 
   // New launch on home (no automatic redirect on normal SPA home visits).

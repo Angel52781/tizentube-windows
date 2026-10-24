@@ -1,12 +1,14 @@
 # TizenTube Windows
 
-[![Descargar TizenTube Windows — ZIP portable](https://img.shields.io/badge/%E2%AC%87%20DESCARGAR-Windows%2010%2F11%20x64-087fca?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.7/TizenTube-Windows-x64-v0.1.0-preview.7.zip)
+[![Descargar TizenTube Windows — ZIP portable](https://img.shields.io/badge/%E2%AC%87%20DESCARGAR-Windows%2010%2F11%20x64-087fca?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.8/TizenTube-Windows-x64-v0.1.0-preview.8.zip)
 
-**[Descarga directa para Windows (versión de prueba)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.7/TizenTube-Windows-x64-v0.1.0-preview.7.zip)** · [Instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md) · [Todas las versiones](https://github.com/Angel52781/tizentube-windows/releases)
+**[Descarga directa para Windows (versión de prueba)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.8/TizenTube-Windows-x64-v0.1.0-preview.8.zip)** · [Instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md) · [Todas las versiones](https://github.com/Angel52781/tizentube-windows/releases)
 
 > **¿Windows muestra «Windows protegió su PC»?** Esta versión de prueba todavía no tiene firma digital de un editor reconocido. Consulta [por qué sucede y las opciones de firma](docs/SMARTSCREEN_AND_SIGNING.md). No implica por sí mismo que el archivo sea malicioso; verifica siempre el origen y el SHA-256.
 
-**Descarga para probar en Windows 10/11 x64:** [Releases / v0.1.0-preview.7](https://github.com/Angel52781/tizentube-windows/releases/tag/v0.1.0-preview.7). Descargar el ZIP de **Assets**, extraer toda la carpeta y ejecutar `TizenTubeHost.exe`. Ver [instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md).
+**Descarga para probar en Windows 10/11 x64:** [Releases / v0.1.0-preview.8](https://github.com/Angel52781/tizentube-windows/releases/tag/v0.1.0-preview.8). Descargar el ZIP de **Assets**, extraer toda la carpeta y ejecutar `TizenTubeHost.exe`. Ver [instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md).
+
+**Preview.8 — reproductor flotante en Windows:** en WebView2 el botón PiP desaparecía si Chromium indicaba que la función del navegador estaba deshabilitada. Ahora el botón permanece disponible y activa una **ventana TizenTube compacta, redimensionable y siempre encima**, reutilizando el mismo WebView2 y sesión de vídeo. Clic de nuevo, `Ctrl+Mayús+P` o cerrar la ventana flotante restaura la vista normal. No abre un segundo navegador ni otra sesión, pero tampoco permite navegar simultáneamente dentro de TizenTube mientras flota; sí permite utilizar otras aplicaciones de Windows. [Detalle técnico](docs/VIEWING_EXPERIENCE.md).
 
 **Preview.7 — experiencia de reproducción:** pantalla completa inmersiva para cubrir el monitor, con restauración del tamaño anterior y ocultación del marco mediante F11; **modo cine persistente** entre vídeos y reinicios; **último vídeo y posición guardados localmente** con reanudación al reabrir; **PiP nativo** como botón junto a los controles de YouTube donde Chromium lo permita; optimización de trabajo en segundo plano y recortes de memoria. El logo no se rediseña en esta versión por prioridad. [Diseño y limitaciones](docs/VIEWING_EXPERIENCE.md).
 

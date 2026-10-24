@@ -13,6 +13,12 @@ export class ViewingExperience {
     this.theaterObserver = null;
     this.theaterElement = null;
     this.pipButton = null;
+    this._boundFloatingKey = e => {
+      if (e.ctrlKey && e.shiftKey && e.code === 'KeyP' && !e.repeat) {
+        e.preventDefault?.();
+        this.togglePictureInPicture();
+      }
+    };
     this.retryTimer = null;
     this.saveTheaterSuppressed = false;
     this.isNavigating = false;
@@ -147,7 +153,15 @@ export class ViewingExperience {
   togglePictureInPicture() {
     if (typeof document === 'undefined') return false;
     const video = this.playback?.videoElement || document.querySelector?.('video.html5-main-video');
-    if (!video || !document.pictureInPictureEnabled || !video.requestPictureInPicture) return false;
+    if (!video) return false;
+    // WebView2 commonly disables the Chromium PiP API. Never hide the
+    // control: the native host can float the *same* playback session in a
+    // compact topmost window without cloning the video or losing auth.
+    if (typeof window !== 'undefined' && window.chrome?.webview?.postMessage) {
+      window.chrome.webview.postMessage({ channel: 'window:toggle-floating' });
+      return true;
+    }
+    if (!document.pictureInPictureEnabled || !video.requestPictureInPicture) return false;
     try {
       const operation = document.pictureInPictureElement
         ? document.exitPictureInPicture() : video.requestPictureInPicture();
@@ -159,14 +173,14 @@ export class ViewingExperience {
   mountPipControl() {
     if (typeof document === 'undefined' || !this.getVideoId()) return false;
     const controls = document.querySelector?.('.ytp-right-controls');
-    if (!controls || !document.pictureInPictureEnabled) return false;
+    if (!controls) return false;
     const existing = document.getElementById?.('tizentube-native-pip');
     if (existing) { this.pipButton = existing; return true; }
     const button = document.createElement('button');
     button.id = 'tizentube-native-pip';
     button.type = 'button';
     button.className = 'ytp-button';
-    button.title = 'Imagen en imagen (ventana nativa)';
+    button.title = 'Reproductor flotante · Ctrl+Mayús+P';
     button.setAttribute('aria-label', 'Imagen en imagen');
     button.setAttribute('aria-pressed', 'false');
     button.innerHTML = '<svg viewBox="0 0 36 36" width="34" height="34" aria-hidden="true">' +
@@ -174,7 +188,7 @@ export class ViewingExperience {
       '<rect x="17" y="17" width="12" height="9" rx="1" fill="currentColor"/></svg>';
     button.addEventListener('click', e => {
       e.stopPropagation();
-      if (!this.togglePictureInPicture()) button.title = 'Imagen en imagen no disponible para este vídeo';
+      if (!this.togglePictureInPicture()) button.title = 'Abre un vídeo para usar el reproductor flotante';
     });
     const settings = controls.querySelector?.('.ytp-settings-button');
     controls.insertBefore(button, settings || null);
@@ -190,14 +204,20 @@ export class ViewingExperience {
   }
 
   onNavigation() {
-    if (this.disposed || !this.getVideoId()) return;
+    if (this.disposed) return;
+    if (!this.getVideoId()) {
+      if (typeof document !== 'undefined' && document.documentElement?.classList?.contains('tt-floating-mode')) {
+        window.chrome?.webview?.postMessage?.({ channel: 'window:restore-floating' });
+      }
+      return;
+    }
     // On SPA transitions, the player/controls arrive after yt-navigate-finish.
     if (this.retryTimer) clearTimeout(this.retryTimer);
     let attempts = 0;
     const tryAttach = () => {
       if (this.disposed || !this.getVideoId()) return;
       const theaterReady = this.syncTheaterMode();
-      const pipReady = !document.pictureInPictureEnabled || this.mountPipControl();
+      const pipReady = this.mountPipControl();
       const ready = theaterReady && pipReady;
       if (!ready && attempts++ < 16) this.retryTimer = setTimeout(tryAttach, 650);
     };
@@ -212,6 +232,7 @@ export class ViewingExperience {
     window.addEventListener('yt-navigate-finish', this._boundNav);
     window.addEventListener('popstate', this._boundNav);
     window.addEventListener('pagehide', this._boundVisibility);
+    window.addEventListener('keydown', this._boundFloatingKey);
     document?.addEventListener?.('visibilitychange', this._boundVisibility);
     this.playback?.on('timeupdate', this._boundTime);
     this.playback?.on('ready', this._boundReady);
@@ -229,6 +250,7 @@ export class ViewingExperience {
       window.removeEventListener('yt-navigate-start', this._boundNavStart);
       window.removeEventListener('popstate', this._boundNav);
       window.removeEventListener('pagehide', this._boundVisibility);
+      window.removeEventListener('keydown', this._boundFloatingKey);
     }
     if (typeof document !== 'undefined') document.removeEventListener?.('visibilitychange', this._boundVisibility);
     this.playback?.off?.('timeupdate', this._boundTime);
