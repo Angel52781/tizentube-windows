@@ -455,6 +455,7 @@ async function runAll() {
       adSlots: [{}],
       adBreakHeartbeatParams: 'token123',
       playerResponse: {
+        playabilityStatus: { status: 'OK' },
         adPlacements: [{}]
       }
     };
