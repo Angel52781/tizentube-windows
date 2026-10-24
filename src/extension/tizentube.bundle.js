@@ -801,6 +801,7 @@ class ViewingExperience {
     this.pipControlsObserver = null;
     this.pipScanScheduled = false;
     this.pipWatchdog = null;
+    this.theaterRestoreUntil = 0;
     this.pipButton = null;
     // The native WebView2 controller handles floating shortcuts: Chromium
     // consumes Ctrl+Shift+P for Print before a document keydown can cancel it.
@@ -1002,9 +1003,22 @@ class ViewingExperience {
     button.title = 'Reproductor flotante (F9)';
     button.setAttribute('aria-label', 'Imagen en imagen');
     button.setAttribute('aria-pressed', 'false');
-    button.innerHTML = '<svg viewBox="0 0 36 36" width="34" height="34" aria-hidden="true">' +
-      '<rect x="4" y="6" width="28" height="23" rx="2" fill="none" stroke="currentColor" stroke-width="2"/>' +
-      '<rect x="17" y="17" width="12" height="9" rx="1" fill="currentColor"/></svg>';
+    // Avoid innerHTML: YouTube often enforces TrustedHTML, which throws and
+    // silently aborted the full mount in prior releases.
+    const svgNs = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNs, 'svg');
+    for (const [name, value] of Object.entries({ viewBox: '0 0 36 36', width: '34',
+      height: '34', 'aria-hidden': 'true' })) svg.setAttribute(name, value);
+    const outline = document.createElementNS(svgNs, 'rect');
+    for (const [name, value] of Object.entries({ x: '4', y: '6', width: '28',
+      height: '23', rx: '2', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }))
+      outline.setAttribute(name, value);
+    const inset = document.createElementNS(svgNs, 'rect');
+    for (const [name, value] of Object.entries({ x: '17', y: '17', width: '12',
+      height: '9', rx: '1', fill: 'currentColor' })) inset.setAttribute(name, value);
+    svg.appendChild(outline);
+    svg.appendChild(inset);
+    button.appendChild(svg);
     button.addEventListener('click', e => {
       e.stopPropagation();
       if (!this.togglePictureInPicture()) button.title = 'Abre un vídeo para usar el reproductor flotante';
@@ -1012,7 +1026,12 @@ class ViewingExperience {
     // Exact requested location: immediately after CC, before YouTube settings.
     const captions = controls.querySelector?.('.ytp-subtitles-button');
     const settings = controls.querySelector?.('.ytp-settings-button');
-    if (settings) controls.insertBefore(button, settings);
+    // .ytp-settings-button may live in a wrapper instead of being a direct
+    // .ytp-right-controls child. insertBefore() requires a direct child.
+    let settingsChild = settings;
+    while (settingsChild && settingsChild.parentElement !== controls)
+      settingsChild = settingsChild.parentElement;
+    if (settingsChild) controls.insertBefore(button, settingsChild);
     else if (captions?.nextSibling) controls.insertBefore(button, captions.nextSibling);
     else controls.appendChild?.(button);
     this.pipButton = button;
@@ -1049,6 +1068,7 @@ class ViewingExperience {
       }
       return;
     }
+    this.theaterRestoreUntil = Date.now() + 35000;
     // On SPA transitions, the player/controls arrive after yt-navigate-finish.
     if (this.retryTimer) clearTimeout(this.retryTimer);
     let attempts = 0;
@@ -1078,7 +1098,13 @@ class ViewingExperience {
     // navigation. Keep our requested CC → floating → settings placement.
     if (typeof setInterval === 'function')
       this.pipWatchdog = setInterval(() => {
-        if (!this.disposed && this.getVideoId()) this.mountPipControl();
+        if (!this.disposed && this.getVideoId()) {
+          this.mountPipControl();
+          // YouTube reinitializes ytd-watch-flexy after initial navigation,
+          // so the first restore can be overwritten. Reconcile late UI
+          // hydration during a bounded 35-second startup window only.
+          if (Date.now() < this.theaterRestoreUntil) this.syncTheaterMode();
+        }
       }, 2200);
     this.onNavigation();
   }

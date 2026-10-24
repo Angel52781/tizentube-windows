@@ -38,6 +38,8 @@ const rightControls = { children: [captionsButton, settingsButton], insertBefore
   if (selector === '.ytp-subtitles-button') return captionsButton;
   return null;
 } };
+settingsButton.parentElement = rightControls;
+captionsButton.parentElement = rightControls;
 const domElements = new Map();
 const video = { currentTime: 123, duration: 1800, addEventListener() {}, requestPictureInPicture: player.requestPictureInPicture };
 const playback = { videoElement: video, listeners: new Map(), on(e, f) { this.listeners.set(e,f); },
@@ -79,9 +81,11 @@ try {
       const handlers = new Map();
       return {
         setAttribute() {}, addEventListener: (k,f) => handlers.set(k,f), handlers,
+        appendChild() {},
         remove() {}, id: '', className: '', innerHTML: '', type: ''
       };
     },
+    createElementNS() { return { setAttribute() {}, appendChild() {} }; },
     getElementById(id) { return domElements.get(id) || null; },
     addEventListener() {}, removeEventListener() {}
   };
