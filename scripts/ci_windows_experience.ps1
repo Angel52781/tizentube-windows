@@ -110,6 +110,17 @@ try {
         $back.toolbarClicked -and $back.request.pushed -eq '/results' -and
         $back.nativeSource -eq $back.request.original) 'native-toolbar-back-navigates-spa-history'
 
+    $toolbarPng = Join-Path $dir 'navigation-toolbar.png'
+    Assert-E2E (Test-Path $toolbarPng) 'native-toolbar-pixel-evidence-generated'
+    Add-Type -AssemblyName System.Drawing
+    $navBitmap = [System.Drawing.Bitmap]::FromFile($toolbarPng)
+    try {
+        Assert-E2E ($navBitmap.Width -ge 120 -and $navBitmap.Height -ge 36) 'native-toolbar-proportions'
+        $background = $navBitmap.GetPixel(92, 2)
+        Assert-E2E ($background.R -lt 85 -and $background.G -lt 85 -and
+            $background.B -lt 85) 'native-toolbar-dark-not-browser-white-tile'
+    } finally { $navBitmap.Dispose() }
+
     # HiDPI font rendering & comment layout probe verification
     Write-Host 'Verifying HiDPI layout, font rendering, and comment styles...'
     $layout = Read-Json 'hidpi-layout-probe.json'
