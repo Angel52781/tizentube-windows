@@ -1,4 +1,6 @@
 name: Windows Real Video and Viewing Experience E2E
+# Both this workflow and windows-native-validation gate preview.12. The release
+# must be bound to the exact SHA that passed both independent Windows runners.
 
 on:
   push:
