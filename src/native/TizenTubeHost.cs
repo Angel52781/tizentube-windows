@@ -47,6 +47,8 @@ namespace TizenTubeWindows
         public bool NavigationPlaybackProbe { get; set; } = false;
         public bool UnmodifiedWebViewProbe { get; set; } = false;
         public bool TitlebarProbe { get; set; } = false;
+        public bool SessionSetupProbe { get; set; } = false;
+        public bool SessionRestoreProbe { get; set; } = false;
 
         public static HostOptions Parse(string[] args)
         {
@@ -142,6 +144,8 @@ namespace TizenTubeWindows
                 else if (arg == "--navigation-playback-probe") options.NavigationPlaybackProbe = true;
                 else if (arg == "--unmodified-webview-probe") options.UnmodifiedWebViewProbe = true;
                 else if (arg == "--titlebar-probe") options.TitlebarProbe = true;
+                else if (arg == "--session-setup-probe") options.SessionSetupProbe = true;
+                else if (arg == "--session-restore-probe") options.SessionRestoreProbe = true;
                 else if (arg == "--help" || arg == "-h")
                 {
                     options.ShowHelp = true;
@@ -354,10 +358,18 @@ namespace TizenTubeWindows
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "TizenTube", this.options.TvMode ? "TVUserData" : "UserData"
             );
+            // CI session runs must not reuse personal Google/WebView profiles.
+            string sessionTestRoot = Environment.GetEnvironmentVariable("TIZENTUBE_TEST_SESSION_DIR");
+            if ((options.SessionSetupProbe || options.SessionRestoreProbe) &&
+                !string.IsNullOrWhiteSpace(sessionTestRoot))
+                appDataDir = Path.Combine(sessionTestRoot, "webview");
             Directory.CreateDirectory(appDataDir);
             theaterPreferenceFile = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "TizenTube", this.options.TvMode ? "tv-theater-preference.json" : "theater-preference.json");
+            if ((options.SessionSetupProbe || options.SessionRestoreProbe) &&
+                !string.IsNullOrWhiteSpace(sessionTestRoot))
+                theaterPreferenceFile = Path.Combine(sessionTestRoot, "theater-preference.json");
             // Window layout is independent of WebView2's Google login data.
             windowPlacementFile = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -527,6 +539,48 @@ namespace TizenTubeWindows
                     if (!oneBar || !webviewBelowBar || !nativeTaskbarMinimize ||
                         !maximized || !restored || !minimized) ExitCode = 12;
                     Console.WriteLine($"[Titlebar] oneBar={oneBar} maximized={maximized} restored={restored} minimized={minimized}");
+                };
+            }
+            if ((this.options.SessionSetupProbe || this.options.SessionRestoreProbe) &&
+                !this.options.HeadlessMode)
+            {
+                this.Shown += async (sender, evt) => {
+                    await Task.Delay(options.SessionSetupProbe ? 7000 : 11000);
+                    if (IsDisposed || webView?.CoreWebView2 == null) { ExitCode = 14; return; }
+                    string folder = Path.GetDirectoryName(options.TelemetryFilePath ?? "");
+                    if (string.IsNullOrEmpty(folder)) folder = appDataDir;
+                    Directory.CreateDirectory(folder);
+                    try
+                    {
+                        if (options.SessionSetupProbe)
+                        {
+                            // Simulate a durable checkpoint without inventing
+                            // functional video playback in a cloud runner.
+                            string proof = await webView.CoreWebView2.ExecuteScriptAsync(
+                                "(() => {const state={id:'aqz-KE-bpKQ',position:137," +
+                                "duration:2100,updatedAt:Date.now()};" +
+                                "localStorage.setItem('tizentube.lastVideo.v1',JSON.stringify(state));" +
+                                "localStorage.setItem('tizentube.theater.v1','true');" +
+                                "return {saved:localStorage.getItem('tizentube.lastVideo.v1')!==null};})()");
+                            File.WriteAllText(Path.Combine(folder, "session-setup.json"), proof);
+                            File.WriteAllText(theaterPreferenceFile, "true");
+                            if (!proof.Contains("\"saved\":true")) ExitCode = 14;
+                        }
+                        else
+                        {
+                            string state = await webView.CoreWebView2.ExecuteScriptAsync(
+                                "(() => ({href:location.href,theater:" +
+                                "window.__TIZENTUBE_LOADER__?.viewing?.savedTheaterState?.()??null}))()");
+                            File.WriteAllText(Path.Combine(folder, "session-reopen.json"), state);
+                            if (!state.Contains("aqz-KE-bpKQ") || !state.Contains("t=137s") ||
+                                !state.Contains("\"theater\":true")) ExitCode = 14;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine("[Host Session Probe] " + ex.Message);
+                        ExitCode = 14;
+                    }
                 };
             }
         }

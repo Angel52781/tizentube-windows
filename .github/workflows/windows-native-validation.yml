@@ -95,6 +95,12 @@ jobs:
           & pwsh -NoProfile -File scripts/ci_windows_titlebar.ps1 -Executable windows-out/TizenTubeHost.exe -EvidenceDirectory windows-out/telemetry/titlebar
           if ($LASTEXITCODE -ne 0) { throw 'INTEGRATED_TITLEBAR_E2E_FAILED' }
 
+      - name: Verify last video and theater preferences survive native process restart
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File scripts/ci_windows_session_reopen.ps1 -Executable windows-out/TizenTubeHost.exe -EvidenceDirectory windows-out/telemetry/session
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_SESSION_REOPEN_FAILED' }
+
       - name: Execute Windows native host with process tree telemetry (multi-scenario)
         shell: pwsh
         run: |

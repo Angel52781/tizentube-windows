@@ -59,6 +59,10 @@ try {
     'Chrome reserves 38 px normally and none in fullscreen');
   assert.ok(host.includes('WsMinimizeBox | WsMaximizeBox | WsThickFrame'),
     'Windows retains shell taskbar minimize/restore protocol');
+  assert.ok(host.includes('SessionSetupProbe') && host.includes('SessionRestoreProbe'),
+    'The native acceptance suite can exercise continuity across independent Windows processes');
+  assert.ok(!host.includes('await Task.Delay(4900);'),
+    'Theater restoration must wait for readiness, not an unconditional five-second delay');
   for (const captionAction of ['Minimize', 'Maximize', 'Close']) {
     assert.ok(toolbar.includes('GlyphButton.Kind.' + captionAction),
       captionAction + ' has a real native caption button');
