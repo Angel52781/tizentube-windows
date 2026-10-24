@@ -43,6 +43,7 @@ jobs:
         run: |
           node scripts/bundle_mods.js
           node scripts/test_runtime.js
+          node scripts/test_playback_failopen.js
           node scripts/test_ui_features.js
           node scripts/test_keyboard_shortcuts.js
           node scripts/test_hidpi_comments_ux.js
