@@ -1159,12 +1159,16 @@ namespace TizenTubeWindows
                 await Task.Delay(14000);
                 string media = "(() => {const v=document.querySelector('video.html5-main-video');" +
                     "const id=new URL(location.href).searchParams.get('v');" +
+                    "const p=window.ytInitialPlayerResponse?.playabilityStatus;" +
+                    "const message=document.querySelector('yt-player-error-message-renderer,.ytp-error');" +
                     "return {id,watch:location.pathname==='/watch',readyState:v?.readyState??0," +
                     "width:v?.videoWidth??0,time:v?.currentTime??0,paused:v?.paused??true," +
                     "duration:Number.isFinite(v?.duration)?v.duration:0," +
                     "error:!!document.querySelector('.ytp-error')," +
                     "mediaErrorCode:v?.error?.code??null," +
-                    "errorLabel:(document.querySelector('.ytp-error')?.textContent||'').slice(0,160)};})()";
+                    "playabilityStatus:p?.status??null," +
+                    "playabilityReason:String(p?.reason||'').slice(0,160)," +
+                    "errorLabel:(message?.textContent||'').slice(0,160)};})()";
                 // A click can reach /watch with playback paused due autoplay
                 // policies. Trigger the same player play control as a user.
                 await webView.CoreWebView2.ExecuteScriptAsync(
@@ -1175,6 +1179,11 @@ namespace TizenTubeWindows
                 await Task.Delay(3900);
                 File.WriteAllText(Path.Combine(folder, "journey-first-after.json"),
                     await webView.CoreWebView2.ExecuteScriptAsync(media));
+                // Guest-only screenshot for diagnosing YouTube's challenge UI
+                // when a Windows cloud runner receives no playable stream.
+                using (var capture = File.Create(Path.Combine(folder, "journey-first-frame.png")))
+                    await webView.CoreWebView2.CapturePreviewAsync(
+                        CoreWebView2CapturePreviewImageFormat.Png, capture);
 
                 string firstId = "";
                 try
@@ -1205,6 +1214,9 @@ namespace TizenTubeWindows
                 await Task.Delay(4000);
                 File.WriteAllText(Path.Combine(folder, "journey-second-after.json"),
                     await webView.CoreWebView2.ExecuteScriptAsync(media));
+                using (var capture = File.Create(Path.Combine(folder, "journey-second-frame.png")))
+                    await webView.CoreWebView2.CapturePreviewAsync(
+                        CoreWebView2CapturePreviewImageFormat.Png, capture);
                 Console.WriteLine("[Host Journey] Guest home/feed/video-to-video evidence exported");
             }
             catch (Exception ex)
