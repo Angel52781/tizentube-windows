@@ -618,13 +618,12 @@ async function runAll() {
     dispatchKey('Home');
     assert.strictEqual(playback.state.currentTime, 0, 'Home key should seek to 0s');
 
-    // c/C captions
+    // C/T are native YouTube keys. Do not synthesize a second click:
+    // ViewingExperience must receive trusted T for durable theater preference.
     dispatchKey('c');
-    assert.strictEqual(captionsTriggered, true, 'Key c should emit toggleCaptions');
-
-    // t/T theater
     dispatchKey('t');
-    assert.strictEqual(theaterTriggered, true, 'Key t should emit toggleTheater');
+    assert.strictEqual(captionsTriggered, false, 'Key c must defer to native YouTube');
+    assert.strictEqual(theaterTriggered, false, 'Key t must defer to native YouTube');
 
     // Input target guard: typing inside an input should not trigger seek
     const fakeInput = new MockElement('input');
