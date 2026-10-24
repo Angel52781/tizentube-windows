@@ -544,118 +544,111 @@ class PlaybackEngine {
     if (this._onKeyDown) return;
 
     this._onKeyDown = (e) => {
-      // Avoid intercepting keystrokes inside search input or comments
-      const tag = e.target.tagName ? e.target.tagName.toLowerCase() : '';
-      if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) {
+      // Do not steal browser/system combinations, text entry, or the focused
+      // buttons and sliders. Keyboard controls belong to video playback only.
+      const target = e.target;
+      const tag = target?.tagName?.toLowerCase?.() || '';
+      if (e.isComposing || e.ctrlKey || e.altKey || e.metaKey ||
+          target?.isContentEditable ||
+          ['input', 'textarea', 'select', 'button', 'a'].includes(tag) ||
+          target?.closest?.('[contenteditable], [role="textbox"], [role="button"], [role="slider"], [role="menuitem"]')) {
         return;
       }
 
-      // Percent jumps (0-9)
-      if (e.key >= '0' && e.key <= '9') {
+      // YouTube also handles these keys. Capture *before* its document/player
+      // handlers; preventDefault alone at window bubble phase is too late
+      // and causes a 5s seek followed by another 5s seek (visible as 10s).
+      const claim = () => {
         e.preventDefault();
-        const percent = parseInt(e.key, 10) * 10;
+        e.stopImmediatePropagation?.();
+      };
+      const key = e.code === 'Space' ? ' ' : e.key;
+
+      // Native YouTube owns C (captions), T (theater) and I (miniplayer).
+      // ViewingExperience observes the *trusted* T key to persist theater
+      // choice. Consuming these at window capture would break that contract.
+      if (typeof key === 'string' && ['c', 't', 'i'].includes(key.toLowerCase())) return;
+
+      // Percent jumps (0-9)
+      if (key >= '0' && key <= '9') {
+        claim();
+        const percent = parseInt(key, 10) * 10;
         const target = (this.state.duration || 0) * (percent / 100);
         this.seekTo(target);
         return;
       }
 
-      switch (e.key) {
+      switch (key) {
         case ' ':
+        case 'Spacebar':
         case 'k':
         case 'K':
-          e.preventDefault();
-          this.togglePlay();
+          claim();
+          if (!e.repeat) this.togglePlay();
           break;
         case 'j':
         case 'J':
-          e.preventDefault();
+          claim();
           this.seekBy(-10);
           break;
         case 'l':
         case 'L':
-          e.preventDefault();
+          claim();
           this.seekBy(10);
           break;
         case 'ArrowLeft':
-          e.preventDefault();
+          claim();
           this.seekBy(-5);
           break;
         case 'ArrowRight':
-          e.preventDefault();
+          claim();
           this.seekBy(5);
           break;
         case 'Home':
-          e.preventDefault();
+          claim();
           this.seekTo(0);
           break;
         case 'End':
-          e.preventDefault();
+          claim();
           this.seekTo(this.state.duration || 0);
           break;
         case 'ArrowUp':
-          e.preventDefault();
+          claim();
           this.adjustVolume(5);
           break;
         case 'ArrowDown':
-          e.preventDefault();
+          claim();
           this.adjustVolume(-5);
           break;
         case 'm':
         case 'M':
-          e.preventDefault();
+          claim();
           this.toggleMute();
           break;
         case 'f':
         case 'F':
         case 'F11':
-          e.preventDefault();
+          claim();
           this.toggleFullscreen();
           break;
         case '>':
         case '.':
           if (e.shiftKey || e.key === '>') {
-            e.preventDefault();
+            claim();
             this.setPlaybackRate(this.state.playbackRate + 0.25);
           }
           break;
         case '<':
         case ',':
           if (e.shiftKey || e.key === '<') {
-            e.preventDefault();
+            claim();
             this.setPlaybackRate(this.state.playbackRate - 0.25);
           }
-          break;
-        case 'c':
-        case 'C':
-          e.preventDefault();
-          if (typeof document !== 'undefined') {
-            const ccBtn = document.querySelector('.ytp-subtitles-button');
-            if (ccBtn) ccBtn.click();
-          }
-          this.emit('toggleCaptions');
-          break;
-        case 't':
-        case 'T':
-          e.preventDefault();
-          if (typeof document !== 'undefined') {
-            const theaterBtn = document.querySelector('.ytp-size-button');
-            if (theaterBtn) theaterBtn.click();
-          }
-          this.emit('toggleTheater');
-          break;
-        case 'i':
-        case 'I':
-          e.preventDefault();
-          if (typeof document !== 'undefined') {
-            const miniBtn = document.querySelector('.ytp-miniplayer-button');
-            if (miniBtn) miniBtn.click();
-          }
-          this.emit('toggleMiniplayer');
           break;
       }
     };
 
-    window.addEventListener('keydown', this._onKeyDown);
+    window.addEventListener('keydown', this._onKeyDown, true);
   }
 
   /**
@@ -742,7 +735,7 @@ class PlaybackEngine {
       this.videoObserver = null;
     }
     if (typeof window !== 'undefined' && this._onKeyDown) {
-      window.removeEventListener('keydown', this._onKeyDown);
+      window.removeEventListener('keydown', this._onKeyDown, true);
       this._onKeyDown = null;
     }
     if (typeof document !== 'undefined' && this._onFsChange) {
@@ -764,7 +757,8 @@ class PlaybackEngine {
 class ViewingExperience {
   constructor(playback, options = {}) {
     this.playback = playback;
-    this.options = { restoreOnLaunch: true, ...options };
+    // Never force the last watched video at application start. Resume is opt-in.
+    this.options = { restoreOnLaunch: false, ...options };
     this.theaterKey = 'tizentube.theater.v1';
     this.lastKey = 'tizentube.lastVideo.v1';
     this.lastSavedAt = 0;
@@ -2174,6 +2168,11 @@ class AdBlockBase {
     const isTvPayload = Boolean(obj.contents?.tvBrowseRenderer)
       || (typeof location !== 'undefined' && /^\/tv(?:\/|$)/.test(location.pathname || ''));
 
+    // Desktop player responses carry the streaming contract. Removing ad
+    // properties here can invalidate playback on accounts/regions not used
+    // by CI. Fail open on the player; feed cosmetics remain independently on.
+    if (!isTvPayload && (obj.streamingData || obj.playabilityStatus)) return;
+
     if (obj.adPlacements) {
       if (isTvPayload) obj.adPlacements = [];
       else delete obj.adPlacements;
@@ -2606,39 +2605,12 @@ class AdBlockBase {
         }
       }
 
-      // 2. If video player is marked as showing an ad (.ad-showing / .ad-interrupting), speed through it and mute
-      const player = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
-      const isAdShowing = Boolean(player && player.classList && (
-        player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting')
-      ));
-      const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+      // Deliberately never seek the HTML5 video to its duration or change
+      // its speed/mute state on the basis of a CSS ad-showing class.
+      // YouTube can leave that class behind while the real video loads;
+      // skipping to the end then destroys legitimate playback. Use only
+      // the native, visible skip-ad control (if YouTube provides one).
 
-      if (isAdShowing) {
-        if (video && !isNaN(video.duration) && video.duration > 0) {
-          try {
-            if (!this._wasAdPlaying) {
-              this._preAdRate = video.playbackRate || 1.0;
-              this._preAdMuted = video.muted || false;
-              this._wasAdPlaying = true;
-            }
-            video.muted = true;
-            video.playbackRate = 16.0;
-            video.currentTime = video.duration;
-            this.adVideoSpeedupCount++;
-          } catch (_) {}
-        }
-      } else if (this._wasAdPlaying) {
-        // Ad finished: cleanly restore user's preferred speed and mute state
-        this._wasAdPlaying = false;
-        if (video) {
-          try {
-            if (this._preAdRate !== null) video.playbackRate = this._preAdRate;
-            if (this._preAdMuted !== null) video.muted = this._preAdMuted;
-          } catch (_) {}
-        }
-        this._preAdRate = null;
-        this._preAdMuted = null;
-      }
     };
 
     this.skipObserver = new MutationObserver(() => {

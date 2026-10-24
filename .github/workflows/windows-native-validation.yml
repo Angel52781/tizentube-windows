@@ -85,6 +85,14 @@ jobs:
           "TIMESTAMP=$([DateTime]::UtcNow.ToString('o'))" | Out-File -FilePath windows-out/build-evidence.txt -Append
           Write-Host "[OK] Compiled native host: $hash ($($exe.Length) bytes)" -ForegroundColor Green
 
+      # A single dark titlebar must replace the Windows caption, not stack
+      # another row beneath it. Verify actual native window-state changes.
+      - name: Verify integrated window titlebar, maximize and minimize
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File scripts/ci_windows_titlebar.ps1 -Executable windows-out/TizenTubeHost.exe -EvidenceDirectory windows-out/telemetry/titlebar
+          if ($LASTEXITCODE -ne 0) { throw 'INTEGRATED_TITLEBAR_E2E_FAILED' }
+
       - name: Execute Windows native host with process tree telemetry (multi-scenario)
         shell: pwsh
         run: |

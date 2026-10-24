@@ -46,6 +46,7 @@ namespace TizenTubeWindows
         public bool KeyboardShortcutsProbe { get; set; } = false;
         public bool NavigationPlaybackProbe { get; set; } = false;
         public bool UnmodifiedWebViewProbe { get; set; } = false;
+        public bool TitlebarProbe { get; set; } = false;
 
         public static HostOptions Parse(string[] args)
         {
@@ -140,6 +141,7 @@ namespace TizenTubeWindows
                 else if (arg == "--keyboard-shortcuts-probe") options.KeyboardShortcutsProbe = true;
                 else if (arg == "--navigation-playback-probe") options.NavigationPlaybackProbe = true;
                 else if (arg == "--unmodified-webview-probe") options.UnmodifiedWebViewProbe = true;
+                else if (arg == "--titlebar-probe") options.TitlebarProbe = true;
                 else if (arg == "--help" || arg == "-h")
                 {
                     options.ShowHelp = true;
@@ -217,6 +219,23 @@ namespace TizenTubeWindows
 
     public class MainWindow : Form
     {
+        [DllImport("user32.dll")]
+        private static extern bool ReleaseCapture();
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wparam, IntPtr lparam);
+        private const int WmNcHitTest = 0x0084;
+        private const int WmNcLButtonDown = 0x00A1;
+        private const int HtClient = 1;
+        private const int HtCaption = 2;
+        private const int HtLeft = 10;
+        private const int HtRight = 11;
+        private const int HtTop = 12;
+        private const int HtTopLeft = 13;
+        private const int HtTopRight = 14;
+        private const int HtBottom = 15;
+        private const int HtBottomLeft = 16;
+        private const int HtBottomRight = 17;
+        private const int ResizeHitArea = 7;
         [DllImport("psapi.dll")]
         private static extern bool EmptyWorkingSet(IntPtr hProcess);
 
@@ -292,7 +311,13 @@ namespace TizenTubeWindows
             this.Text = "TizenTube";
             this.Size = new Size(1280, 720);
             this.MinimumSize = new Size(800, 500);
+            // The one compact toolbar owns window controls. The standard
+            // Windows caption is intentionally removed, not duplicated.
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.MaximizeBox = true;
+            this.MinimizeBox = true;
             this.StartPosition = FormStartPosition.CenterScreen;
+            this.MaximizedBounds = Screen.PrimaryScreen.WorkingArea;
             try { this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; }
             catch { this.Icon = SystemIcons.Application; }
 
@@ -333,6 +358,12 @@ namespace TizenTubeWindows
             this.Resize += (s, e) => RememberWindowPlacement();
             this.Activated += (s, e) => EnableFocusedFloatingHotkey();
             this.Deactivate += (s, e) => DisableFocusedFloatingHotkey();
+            this.SizeChanged += (s, e) => {
+                if (WindowState == FormWindowState.Maximized &&
+                    !nativeImmersiveActive && !nativeFloatingActive)
+                    MaximizedBounds = Screen.FromControl(this).WorkingArea;
+                navigationToolbar?.SetMaximized(WindowState == FormWindowState.Maximized);
+            };
 
             InitializeWebView();
             SetupMemoryTrimming();
@@ -426,23 +457,114 @@ namespace TizenTubeWindows
                     Console.WriteLine($"[Host Floating Test] float={floated} restore={restored}");
                 });
             }
+            if (this.options.TitlebarProbe && !this.options.HeadlessMode)
+            {
+                this.Shown += async (sender, evt) => {
+                    await Task.Delay(3500);
+                    if (IsDisposed || navigationToolbar == null) { ExitCode = 12; return; }
+                    WindowState = FormWindowState.Normal;
+                    Rectangle bounds = Bounds;
+                    string folder = Path.GetDirectoryName(options.TelemetryFilePath ?? "");
+                    if (string.IsNullOrEmpty(folder)) folder = appDataDir;
+                    Directory.CreateDirectory(folder);
+                    bool oneBar = FormBorderStyle == FormBorderStyle.None &&
+                        navigationToolbar.Visible && navigationToolbar.Height == 38 &&
+                        Controls.Contains(navigationToolbar);
+                    navigationToolbar.InvokeMaximizeForProbe();
+                    await Task.Delay(300);
+                    bool maximized = WindowState == FormWindowState.Maximized &&
+                        navigationToolbar.IsMaximized &&
+                        MaximizedBounds == Screen.FromControl(this).WorkingArea;
+                    navigationToolbar.InvokeMaximizeForProbe();
+                    await Task.Delay(300);
+                    bool restored = WindowState == FormWindowState.Normal &&
+                        !navigationToolbar.IsMaximized && FormBorderStyle == FormBorderStyle.None;
+                    navigationToolbar.InvokeMinimizeForProbe();
+                    await Task.Delay(300);
+                    bool minimized = WindowState == FormWindowState.Minimized;
+                    WindowState = FormWindowState.Normal;
+                    Bounds = bounds;
+                    using (var bitmap = new Bitmap(navigationToolbar.Width, navigationToolbar.Height))
+                    {
+                        navigationToolbar.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
+                        bitmap.Save(Path.Combine(folder, "titlebar-integrated.png"),
+                            System.Drawing.Imaging.ImageFormat.Png);
+                    }
+                    var proof = new { oneBar, maximized, restored, minimized,
+                        height = navigationToolbar.Height, border = FormBorderStyle.ToString() };
+                    File.WriteAllText(Path.Combine(folder, "titlebar-acceptance.json"),
+                        System.Text.Json.JsonSerializer.Serialize(proof));
+                    if (!oneBar || !maximized || !restored || !minimized) ExitCode = 12;
+                    Console.WriteLine($"[Titlebar] oneBar={oneBar} maximized={maximized} restored={restored} minimized={minimized}");
+                };
+            }
         }
 
         private void SetupNavigationToolbar()
         {
-            navigationToolbar = new NavigationToolbar(
+            navigationToolbar = new NavigationToolbar(this.Icon,
                 () => {
                     if (webView?.CoreWebView2?.CanGoBack == true)
                         webView.CoreWebView2.GoBack();
                 },
                 () => {
                     webView?.CoreWebView2?.Reload();
-                });
+                },
+                DragNativeWindow,
+                () => { WindowState = FormWindowState.Minimized; },
+                ToggleNativeMaximize,
+                () => { Close(); });
             Controls.Add(navigationToolbar);
             navigationToolbar.BringToFront();
+            navigationToolbar.SetMaximized(WindowState == FormWindowState.Maximized);
             UpdateNavigationToolbarVisibility();
         }
 
+        private void DragNativeWindow()
+        {
+            if (nativeImmersiveActive || nativeFloatingActive) return;
+            // Send a native NC caption interaction to preserve Windows drag,
+            // Aero Snap and the standard window move behavior.
+            ReleaseCapture();
+            SendMessage(Handle, WmNcLButtonDown, (IntPtr)HtCaption, IntPtr.Zero);
+        }
+
+        private void ToggleNativeMaximize()
+        {
+            if (nativeImmersiveActive || nativeFloatingActive) return;
+            if (WindowState == FormWindowState.Maximized)
+                WindowState = FormWindowState.Normal;
+            else
+            {
+                MaximizedBounds = Screen.FromControl(this).WorkingArea;
+                WindowState = FormWindowState.Maximized;
+            }
+            navigationToolbar?.SetMaximized(WindowState == FormWindowState.Maximized);
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            if (m.Msg != WmNcHitTest || m.Result.ToInt64() != HtClient ||
+                WindowState != FormWindowState.Normal ||
+                nativeImmersiveActive || nativeFloatingActive ||
+                FormBorderStyle != FormBorderStyle.None) return;
+            // A borderless Windows form normally cannot be resized. Return
+            // genuine non-client hit-test codes for the screen-edge grips.
+            Point point = PointToClient(Cursor.Position);
+            bool left = point.X >= 0 && point.X < ResizeHitArea;
+            bool right = point.X <= Width && point.X >= Width - ResizeHitArea;
+            bool top = point.Y >= 0 && point.Y < ResizeHitArea;
+            bool bottom = point.Y <= Height && point.Y >= Height - ResizeHitArea;
+            if (left && top) m.Result = (IntPtr)HtTopLeft;
+            else if (right && top) m.Result = (IntPtr)HtTopRight;
+            else if (left && bottom) m.Result = (IntPtr)HtBottomLeft;
+            else if (right && bottom) m.Result = (IntPtr)HtBottomRight;
+            else if (left) m.Result = (IntPtr)HtLeft;
+            else if (right) m.Result = (IntPtr)HtRight;
+            else if (top) m.Result = (IntPtr)HtTop;
+            else if (bottom) m.Result = (IntPtr)HtBottom;
+        }
         private void UpdateNavigationToolbar()
         {
             if (navigationToolbar == null || IsDisposed || webView?.CoreWebView2 == null) return;

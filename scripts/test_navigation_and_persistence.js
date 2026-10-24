@@ -49,6 +49,16 @@ try {
     'YouTube masthead back overlay is no longer injected');
   assert.ok(!project.includes('TizenTube.NavigationControls'),
     'Native package cannot embed obsolete masthead overlay');
+  assert.ok(host.includes('this.FormBorderStyle = FormBorderStyle.None;'),
+    'One integrated titlebar replaces, rather than duplicates, the OS caption');
+  assert.ok(host.includes('DragNativeWindow') && host.includes('WmNcHitTest'),
+    'Frameless window supports dragging and Windows-native resize hit testing');
+  assert.ok(host.includes('ToggleNativeMaximize') && host.includes('MaximizedBounds'),
+    'Custom maximize/restore retains Windows taskbar bounds');
+  for (const captionAction of ['Minimize', 'Maximize', 'Close']) {
+    assert.ok(toolbar.includes('GlyphButton.Kind.' + captionAction),
+      captionAction + ' has a real native caption button');
+  }
   console.log('PASS persisted preferences and native Back/Reload toolbar wiring (Windows E2E validates actual click).');
 } finally {
   if (originalStorage === undefined) delete globalThis.localStorage;

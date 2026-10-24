@@ -155,7 +155,9 @@ async function runTests() {
     assert.strictEqual(mockResponse.adSlots, undefined, 'adSlots must be deleted');
     assert.ok(Array.isArray(mockResponse.playerResponse.adPlacements), 'desktop player ad fields are preserved to protect playback');
     assert.strictEqual(mockResponse.contents.videoId, 'abc123xyz', 'Legitimate content must be preserved');
-    assert(adblock.blockedCount >= 4, 'Must count blocked elements');
+    // Three top-level ad slots are removed. The nested desktop player
+    // response is deliberately left untouched to preserve video playback.
+    assert(adblock.blockedCount >= 3, 'Must count removed top-level ads');
   });
 
   // 6. SponsorBlockBase Tests
