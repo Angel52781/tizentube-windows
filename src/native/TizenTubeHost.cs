@@ -235,6 +235,7 @@ namespace TizenTubeWindows
 
         private readonly HostOptions options;
         private WebView2 webView;
+        private NavigationToolbar navigationToolbar;
         private System.Windows.Forms.Timer memoryTrimTimer;
         private System.Windows.Forms.Timer smokeTestTimer;
         private string appDataDir;
@@ -427,12 +428,44 @@ namespace TizenTubeWindows
             }
         }
 
+        private void SetupNavigationToolbar()
+        {
+            navigationToolbar = new NavigationToolbar(
+                () => {
+                    if (webView?.CoreWebView2?.CanGoBack == true)
+                        webView.CoreWebView2.GoBack();
+                },
+                () => {
+                    webView?.CoreWebView2?.Reload();
+                });
+            Controls.Add(navigationToolbar);
+            navigationToolbar.BringToFront();
+            UpdateNavigationToolbarVisibility();
+        }
+
+        private void UpdateNavigationToolbar()
+        {
+            if (navigationToolbar == null || IsDisposed || webView?.CoreWebView2 == null) return;
+            navigationToolbar.SetBackEnabled(webView.CoreWebView2.CanGoBack);
+            // DocumentTitleChanged includes YouTube's current video title;
+            // no URL, account or browsing history is copied out of WebView2.
+            navigationToolbar.SetTitle(webView.CoreWebView2.DocumentTitle);
+        }
+
+        private void UpdateNavigationToolbarVisibility()
+        {
+            if (navigationToolbar == null || IsDisposed) return;
+            navigationToolbar.Visible = !nativeImmersiveActive && !nativeFloatingActive;
+        }
+
         private async void InitializeWebView()
         {
             try
             {
                 webView = new WebView2 { Dock = DockStyle.Fill };
                 this.Controls.Add(webView);
+                // Navigation is host-owned, not injected into YouTube's masthead.
+                SetupNavigationToolbar();
 
                 // Memory-optimized Chromium CLI arguments:
                 // 1. --renderer-process-limit=1: Restricts Chromium to a single renderer process
@@ -463,6 +496,10 @@ namespace TizenTubeWindows
                     : appDataDir;
                 var env = await CoreWebView2Environment.CreateAsync(null, browserProfile, envOptions);
                 await webView.EnsureCoreWebView2Async(env);
+                webView.CoreWebView2.HistoryChanged += (sender, eventArgs) => UpdateNavigationToolbar();
+                webView.CoreWebView2.SourceChanged += (sender, eventArgs) => UpdateNavigationToolbar();
+                webView.CoreWebView2.DocumentTitleChanged += (sender, eventArgs) => UpdateNavigationToolbar();
+                UpdateNavigationToolbar();
 
                 ConfigureWebViewSettings();
                 SetupFloatingAccelerators();
@@ -836,6 +873,7 @@ namespace TizenTubeWindows
                 this.Bounds = Screen.FromControl(this).Bounds;
                 this.TopMost = true;
                 this.ResumeLayout();
+                UpdateNavigationToolbarVisibility();
             }
             else
             {
@@ -851,6 +889,7 @@ namespace TizenTubeWindows
                 // Do not restore Minimized: a user exiting video fullscreen
                 // should always see a usable window.
                 this.ResumeLayout();
+                UpdateNavigationToolbarVisibility();
             }
         }
 
@@ -899,7 +938,11 @@ namespace TizenTubeWindows
                     Text = "TizenTube";
                 }
             }
-            finally { ResumeLayout(); }
+            finally
+            {
+                UpdateNavigationToolbarVisibility();
+                ResumeLayout();
+            }
         }
 
         private async Task<string> ClickVideoLinkWithTrustedPointerAsync(
@@ -1651,8 +1694,7 @@ namespace TizenTubeWindows
             // Video compositing fix lives in a separate, auditable script.
             await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
                 ReadEmbeddedRequired("TizenTube.FloatingPlayer"));
-            await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
-                ReadEmbeddedRequired("TizenTube.NavigationControls"));
+            // Never inject navigation buttons into youtube.com's own masthead.
             // The owner's explicit theater preference is durable independently
             // of YouTube's own UI resets or localStorage migrations.
             if (File.Exists(theaterPreferenceFile))
