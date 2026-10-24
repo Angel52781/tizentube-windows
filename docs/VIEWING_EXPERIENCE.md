@@ -1,4 +1,14 @@
-# Experiencia de reproducción — v0.1.0-preview.10
+# Experiencia de reproducción — v0.1.0-preview.11
+
+## Corrección basada en pruebas físicas (preview.11)
+
+Tras preview.10, el vídeo del reproductor flotante quedaba negro, el botón PiP no aparecía entre subtítulos y configuración, y modo cine perdía su preferencia tras cerrar la aplicación. La revisión de `ViewingExperience` en WebView2 real mostró que el módulo existía pero `mounted=false`: la inicialización estaba acoplada a una interfaz opcional y a un evento de `DOMContentLoaded` que a veces ya había ocurrido. Se independizó el montaje, se añadieron reintentos acotados y una prueba de recuperación.
+
+En modo flotante, el player de YouTube se mueve temporalmente al `body` para salir de los ancestros transformados/recortados, usando el mismo vídeo y perfil. Se restaura a su ubicación al volver; no se abre un stream duplicado. Una prueba física validó imagen real y progreso de 16 a 19 segundos, no solo que una ventana tuviera dimensiones correctas.
+
+Los controles de YouTube ahora anidan el nuevo botón en el grupo `.ytp-right-controls-left`, *directamente* entre `.ytp-subtitles-button` y `.ytp-settings-button`. La comprobación física confirmó posiciones consecutivas de 48 píxeles.
+
+La preferencia de modo cine se guarda solo tras interacción real del usuario y en `%LOCALAPPDATA%/TizenTube/theater-preference.json` además del almacenamiento web. En reinicios posteriores, se restaura usando la transición de YouTube mediante un clic al botón original **solo si hit-testing confirma que el botón es visible y está debajo del puntero**. No se manipula el atributo `theater` directamente ni se usa un clic durante carga temprana: ambos enfoques produjeron problemas de vídeo o pantalla completa. En la prueba final de Windows se observó `theater=true`, imagen visible, `fullscreen=false` tras 11 y 23 segundos de reinicio. Los ensayos locales de vídeo no contienen tokens ni cookies exportados.
 
 ## Reparación del atajo en el sistema operativo (preview.10)
 

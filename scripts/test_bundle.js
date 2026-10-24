@@ -116,3 +116,8 @@ if (fs.existsSync(extManifestPath) && fs.existsSync(extRulesPath)) {
 }
 
 console.log('\nAll Bundle Verification Tests PASSED successfully.');
+// The mock document is intentionally incomplete, so AdBlock's asynchronous
+// DOM readiness poll never completes under Node. The test has already
+// finished all assertions; do not leave Node running until CI timeout.
+// This exit is limited to the offline verification script, not app runtime.
+process.exit(0);

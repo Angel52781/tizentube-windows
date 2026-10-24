@@ -49,7 +49,10 @@ jobs:
       - name: Play YouTube and verify visible PiP, native controls, persisted cinema
         shell: pwsh
         run: |
-          & ./scripts/ci_windows_experience.ps1 -Executable windows-experience-host/TizenTubeHost.exe -EvidenceDirectory windows-experience-evidence
+          # A same-session PowerShell script can leave $LASTEXITCODE unset
+          # even after all checks pass. Execute it as a child process so CI
+          # sees the actual script exit status instead of a stale value.
+          & pwsh -NoProfile -File ./scripts/ci_windows_experience.ps1 -Executable windows-experience-host/TizenTubeHost.exe -EvidenceDirectory windows-experience-evidence
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_REAL_VIDEO_E2E_FAILED' }
       - name: Preserve PASS or FAIL evidence from hosted Windows runner
         if: always()
