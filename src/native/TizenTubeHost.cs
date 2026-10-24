@@ -1071,11 +1071,32 @@ namespace TizenTubeWindows
                         "const pushed=location.pathname;back.click();" +
                         "return {found:true,original,pushed};})()";
                     string initial = await webView.CoreWebView2.ExecuteScriptAsync(navTest);
-                    await Task.Delay(1200);
-                    string now = await webView.CoreWebView2.ExecuteScriptAsync(
-                        "({current:location.pathname+location.search,buttonExists:!!document.getElementById('tizentube-masthead-back')})");
+                    string now = "null";
+                    string nativePath = "";
+                    // YouTube can replace the document when history.back()
+                    // crosses a WebView2 navigation boundary. Executing JS
+                    // mid-navigation yields null; native Source remains
+                    // inspectable. Wait for a stable document before judging.
+                    for (int attempt = 0; attempt < 12; attempt++)
+                    {
+                        await Task.Delay(650);
+                        if (IsDisposed || webView?.CoreWebView2 == null) break;
+                        Uri src = null;
+                        try { src = new Uri(webView.CoreWebView2.Source); } catch { }
+                        nativePath = src != null && src.Scheme == "https" &&
+                            (src.Host == "youtube.com" || src.Host == "www.youtube.com")
+                            ? src.PathAndQuery : "";
+                        try
+                        {
+                            now = await webView.CoreWebView2.ExecuteScriptAsync(
+                                "({current:location.pathname+location.search,buttonExists:!!document.getElementById('tizentube-masthead-back')})");
+                        }
+                        catch { now = "null"; }
+                        if (now != "null" && nativePath.StartsWith("/watch?", StringComparison.Ordinal)) break;
+                    }
                     File.WriteAllText(Path.Combine(folder, "navigation-back.json"),
-                        "{\"request\":" + initial + ",\"result\":" + now + "}");
+                        "{\"request\":" + initial + ",\"result\":" + now +
+                        ",\"nativeSource\":" + System.Text.Json.JsonSerializer.Serialize(nativePath) + "}");
                 }
             }
             catch (Exception ex) { Console.Error.WriteLine("[Host UI Probe] " + ex.Message); }

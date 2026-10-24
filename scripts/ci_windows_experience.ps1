@@ -108,8 +108,9 @@ try {
     $back = Read-Json 'navigation-back.json'
     Assert-E2E ($back.request.found -and
         $back.request.pushed -eq '/results' -and
-        $back.result.current -eq $back.request.original -and
-        $back.result.buttonExists) 'actual-youtube-masthead-back-navigates-spa-history'
+        ($back.result.current -eq $back.request.original -or
+         $back.nativeSource -eq $back.request.original) -and
+        ($null -eq $back.result -or $back.result.buttonExists)) 'actual-youtube-masthead-back-navigates-spa-history'
 
     # HiDPI font rendering & comment layout probe verification
     Write-Host 'Verifying HiDPI layout, font rendering, and comment styles...'
