@@ -917,7 +917,7 @@ namespace TizenTubeWindows
                     "const id=new URL(a.href).searchParams.get('v');a.click();" +
                     "return {clicked:true,id};})()";
                 string firstClickResult = await webView.CoreWebView2.ExecuteScriptAsync(firstClick);
-                if (firstClickResult.Contains("\\\"clicked\\\":false"))
+                if (firstClickResult.Contains("\"clicked\":false"))
                 {
                     // Anonymous home feeds can be intentionally empty. Search
                     // results are a genuine content-discovery surface too.
@@ -961,7 +961,7 @@ namespace TizenTubeWindows
                     "const id=new URL(a.href).searchParams.get('v');a.click();" +
                     "return {clicked:true,id};})()";
                 string secondClickResult = await webView.CoreWebView2.ExecuteScriptAsync(secondClick);
-                if (secondClickResult.Contains("\\\"clicked\\\":false"))
+                if (secondClickResult.Contains("\"clicked\":false"))
                 {
                     // If YouTube does not render watch recommendations, Back
                     // must take us to discovery, where another organic result
