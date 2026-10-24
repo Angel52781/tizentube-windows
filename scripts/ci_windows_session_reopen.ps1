@@ -5,7 +5,13 @@ $ErrorActionPreference = 'Stop'
 $exe = (Resolve-Path $Executable).Path
 New-Item -ItemType Directory -Force $EvidenceDirectory | Out-Null
 $dir = (Resolve-Path $EvidenceDirectory).Path
-$env:TIZENTUBE_TEST_SESSION_DIR = Join-Path $dir 'isolated-webview-profile'
+# Browser profiles contain cookies/cache, even for guest runs. Never put the
+# profile beneath EvidenceDirectory (which CI uploads as a public artifact).
+$env:TIZENTUBE_TEST_SESSION_DIR = Join-Path ([IO.Path]::GetTempPath()) 'tizentube-guest-session-e2e'
+if ($env:TIZENTUBE_TEST_SESSION_DIR.StartsWith($dir,
+    [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'SESSION_PROFILE_MUST_NOT_BE_IN_PUBLISHED_EVIDENCE'
+}
 try {
   if (Test-Path $env:TIZENTUBE_TEST_SESSION_DIR) {
     Remove-Item $env:TIZENTUBE_TEST_SESSION_DIR -Recurse -Force
@@ -31,5 +37,9 @@ try {
   }
   Write-Host '[PASS] Two Windows processes recover video/time and theater preference'
 } finally {
+  # Runner-only session data must not survive in public artifacts or uploads.
+  if (Test-Path $env:TIZENTUBE_TEST_SESSION_DIR) {
+    Remove-Item $env:TIZENTUBE_TEST_SESSION_DIR -Recurse -Force -ErrorAction SilentlyContinue
+  }
   Remove-Item Env:TIZENTUBE_TEST_SESSION_DIR -ErrorAction SilentlyContinue
 }
