@@ -916,8 +916,23 @@ namespace TizenTubeWindows
                     "if(!a)return {clicked:false};" +
                     "const id=new URL(a.href).searchParams.get('v');a.click();" +
                     "return {clicked:true,id};})()";
-                File.WriteAllText(Path.Combine(folder, "journey-first-click.json"),
-                    await webView.CoreWebView2.ExecuteScriptAsync(firstClick));
+                string firstClickResult = await webView.CoreWebView2.ExecuteScriptAsync(firstClick);
+                if (firstClickResult.Contains("\\\"clicked\\\":false"))
+                {
+                    // Anonymous home feeds can be intentionally empty. Search
+                    // results are a genuine content-discovery surface too.
+                    await webView.CoreWebView2.ExecuteScriptAsync(
+                        "location.assign('https://www.youtube.com/results?search_query=big+buck+bunny')");
+                    await Task.Delay(12000);
+                    string searchClick = "(() => {const a=[...document.querySelectorAll(" +
+                        "'ytd-video-renderer a#video-title,ytd-video-renderer a#thumbnail')]" +
+                        ".find(x=>x.href && x.href.includes('/watch?v='));" +
+                        "if(!a)return {clicked:false,method:'search'};" +
+                        "const id=new URL(a.href).searchParams.get('v');a.click();" +
+                        "return {clicked:true,id,method:'search'};})()";
+                    firstClickResult = await webView.CoreWebView2.ExecuteScriptAsync(searchClick);
+                }
+                File.WriteAllText(Path.Combine(folder, "journey-first-click.json"), firstClickResult);
 
                 await Task.Delay(14000);
                 string media = "(() => {const v=document.querySelector('video.html5-main-video');" +
@@ -945,8 +960,31 @@ namespace TizenTubeWindows
                     "if(!a)return {clicked:false};" +
                     "const id=new URL(a.href).searchParams.get('v');a.click();" +
                     "return {clicked:true,id};})()";
-                File.WriteAllText(Path.Combine(folder, "journey-second-click.json"),
-                    await webView.CoreWebView2.ExecuteScriptAsync(secondClick));
+                string secondClickResult = await webView.CoreWebView2.ExecuteScriptAsync(secondClick);
+                if (secondClickResult.Contains("\\\"clicked\\\":false"))
+                {
+                    // If YouTube does not render watch recommendations, Back
+                    // must take us to discovery, where another organic result
+                    // is available. Do not fabricate a successful navigation.
+                    string firstId = "";
+                    try
+                    {
+                        using (var parsed = System.Text.Json.JsonDocument.Parse(firstClickResult))
+                            firstId = parsed.RootElement.GetProperty("id").GetString() ?? "";
+                    }
+                    catch { }
+                    await webView.CoreWebView2.ExecuteScriptAsync("history.back()");
+                    await Task.Delay(8000);
+                    string other = "(() => {const a=[...document.querySelectorAll(" +
+                        "'ytd-video-renderer a#video-title,ytd-rich-grid-media a#thumbnail')]" +
+                        ".find(x=>{try{const u=new URL(x.href);return u.pathname==='/watch'&&" +
+                        "u.searchParams.get('v')!=='" + firstId + "'}catch{return false}});" +
+                        "if(!a)return {clicked:false,method:'back-to-results'};" +
+                        "const id=new URL(a.href).searchParams.get('v');a.click();" +
+                        "return {clicked:true,id,method:'back-to-results'};})()";
+                    secondClickResult = await webView.CoreWebView2.ExecuteScriptAsync(other);
+                }
+                File.WriteAllText(Path.Combine(folder, "journey-second-click.json"), secondClickResult);
                 await Task.Delay(15000);
                 await webView.CoreWebView2.ExecuteScriptAsync(
                     "document.querySelector('video.html5-main-video')?.play()?.catch(()=>{});");
