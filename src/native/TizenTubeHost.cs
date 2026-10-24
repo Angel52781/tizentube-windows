@@ -1073,28 +1073,27 @@ namespace TizenTubeWindows
                     string initial = await webView.CoreWebView2.ExecuteScriptAsync(navTest);
                     string now = "null";
                     string nativePath = "";
-                    // YouTube can replace the document when history.back()
-                    // crosses a WebView2 navigation boundary. Executing JS
-                    // mid-navigation yields null; native Source remains
-                    // inspectable. Wait for a stable document before judging.
-                    for (int attempt = 0; attempt < 12; attempt++)
+                    // Record initial evidence BEFORE page transition queries.
+                    // This prevents a slow Youtube SPA transition from
+                    // consuming the smoke timeout without any diagnostic.
+                    string proofFile = Path.Combine(folder, "navigation-back.json");
+                    File.WriteAllText(proofFile,
+                        "{\"request\":" + initial + ",\"result\":null,\"nativeSource\":\"\"}");
+                    // Do not ExecuteScriptAsync while YouTube navigates: on
+                    // WebView2 this can hang until the smoke process exits.
+                    // The native Source is observable even during transitions.
+                    for (int attempt = 0; attempt < 14; attempt++)
                     {
-                        await Task.Delay(650);
+                        await Task.Delay(350);
                         if (IsDisposed || webView?.CoreWebView2 == null) break;
                         Uri src = null;
                         try { src = new Uri(webView.CoreWebView2.Source); } catch { }
                         nativePath = src != null && src.Scheme == "https" &&
                             (src.Host == "youtube.com" || src.Host == "www.youtube.com")
                             ? src.PathAndQuery : "";
-                        try
-                        {
-                            now = await webView.CoreWebView2.ExecuteScriptAsync(
-                                "({current:location.pathname+location.search,buttonExists:!!document.getElementById('tizentube-masthead-back')})");
-                        }
-                        catch { now = "null"; }
-                        if (now != "null" && nativePath.StartsWith("/watch?", StringComparison.Ordinal)) break;
+                        if (nativePath.StartsWith("/watch?", StringComparison.Ordinal)) break;
                     }
-                    File.WriteAllText(Path.Combine(folder, "navigation-back.json"),
+                    File.WriteAllText(proofFile,
                         "{\"request\":" + initial + ",\"result\":" + now +
                         ",\"nativeSource\":" + System.Text.Json.JsonSerializer.Serialize(nativePath) + "}");
                 }
