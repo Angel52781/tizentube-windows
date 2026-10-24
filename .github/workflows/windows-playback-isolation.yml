@@ -1,0 +1,49 @@
+name: Windows Playback Isolation - Unmodified WebView2
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: playback-isolation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unmodified-browser:
+    runs-on: windows-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build diagnostic native Windows executable
+        shell: pwsh
+        run: |
+          node scripts/bundle_mods.js
+          python scripts/build_icon.py
+          dotnet publish src/native/TizenTubeWindows.csproj -c Release -f net8.0-windows -r win-x64 --self-contained false -o diagnostic-host
+          if ($LASTEXITCODE -ne 0) { throw 'DIAGNOSTIC_BUILD_FAILED' }
+      - name: Play two guest videos without any injected mods or ad filters
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File ./scripts/ci_windows_navigation_playback.ps1 -Executable diagnostic-host/TizenTubeHost.exe -EvidenceDirectory diagnostic-evidence -UnmodifiedWebView
+          if ($LASTEXITCODE -ne 0) { throw 'UNMODIFIED_WEBVIEW_PLAYBACK_FAILED' }
+      - name: Preserve diagnostic observations (including failures)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unmodified-webview-playback-diagnostics
+          path: diagnostic-evidence/**
+          if-no-files-found: warn
+          retention-days: 14
