@@ -1531,6 +1531,8 @@ namespace TizenTubeWindows
                     "playerInBody:floatDiag?.playerInBody??false," +
                     "fullscreen:!!(document.fullscreenElement || document.querySelector('.ytp-fullscreen') || window.__ttNativeFullscreen)};})()";
 
+                var pixelChecks = new Dictionary<string, string>();
+
                 // A decoded mediaWidth/time-only check can miss a black GPU
                 // compositor surface. Use actual WebView2 screenshots of the
                 // locally generated colored frames on every native transition.
@@ -1547,6 +1549,7 @@ namespace TizenTubeWindows
                         if (center.R + center.G + center.B < 30)
                             throw new InvalidOperationException(
                                 $"OFFLINE_MEDIA_BLACK_CENTER:{stage}:{center.R},{center.G},{center.B}");
+                        pixelChecks[stage] = $"R={center.R},G={center.G},B={center.B}";
                     }
                 }
 
@@ -1600,6 +1603,7 @@ namespace TizenTubeWindows
 
                 var summary = new {
                     success = true,
+                    pixelChecks = pixelChecks,
                     step1_normal = System.Text.Json.JsonDocument.Parse(s1).RootElement,
                     step2_theater = System.Text.Json.JsonDocument.Parse(s2).RootElement,
                     step3_floating = System.Text.Json.JsonDocument.Parse(s3).RootElement,

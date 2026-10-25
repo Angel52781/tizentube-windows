@@ -65,6 +65,17 @@ if ($videoLoaded) {
     Assert-Cycle ($s3.videoWidth -gt 0 -and $s4.videoWidth -gt 0) 'video-present-during-floating-and-fullscreen'
     Assert-Cycle ($s5.videoWidth -gt 0) 'step5-return-video-width-valid-no-black-surface'
     Assert-Cycle ($s5.currentTime -gt ($s1.currentTime + 0.5)) 'step5-return-playback-time-advanced'
+
+    if ($OfflineFixture) {
+        $stages = @('01-normal', '02-theater', '03-floating', '04-fullscreen', '05-return')
+        foreach ($st in $stages) {
+            $pngPath = Join-Path $dir "cycle-$st.png"
+            Assert-Cycle (Test-Path $pngPath) "offline-fixture-png-captured-$st"
+            $pixel = if ($summary.pixelChecks) { $summary.pixelChecks.$st } else { $null }
+            Assert-Cycle (-not [string]::IsNullOrWhiteSpace([string]$pixel)) "offline-fixture-pixel-center-$st"
+            Write-Host "    [Pixel Check] $st central pixel: $pixel" -ForegroundColor Gray
+        }
+    }
 } else {
     Write-Warning "[LIMITATION] YouTube anonymous playback was blocked or unready in CI datacenter runner (videoWidth=$($s1.videoWidth), readyState=$($s1.readyState)). Cause not conclusively determined."
     $script:checks['media-playback-cycle'] = 'NO_VERIFICADO_CAUSA_NO_CONFIRMADA'

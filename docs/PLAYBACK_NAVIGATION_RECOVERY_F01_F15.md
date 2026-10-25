@@ -34,11 +34,12 @@ El análisis estático y dinámico reveló las siguientes causas principales:
 - **Commit `c000aa9`**: Restauración del ciclo de vida del reproductor flotante, implementación de `ci_windows_floating_cycle.ps1`, watchdog de recuperación en `floating_player.js`, aceleración de restauración de cine y sesión.
 - **Commit `e4607f5`**: Corrección sintáctica en `src/native/TizenTubeHost.cs` (eliminación de llave excedente en `CaptureFloatingCycleProbeAsync`).
 - **Commit `04adfef`**: Corrección de API WebView2; eliminación de llamada no soportada `webView.CoreWebView2.DefaultBackgroundColor` en favor de la propiedad directa de WinForms `webView.DefaultBackgroundColor`.
+- **Commit `b9d2515`**: Aislamiento de ciclo de vida de medios reales en WebView2 mediante fixture HTML offline (`fixtures/watch.html`) con `canvas.captureStream(15)` en origen virtual local `tizentube-fixture.invalid`.
+- **Commit `e77f4a3`**: Captura real de 5 previews PNG WebView2 durante las 5 etapas del ciclo y verificación de píxel central no negro.
 - **Commit Actual**:
-  - Resiliencia en entornos de solo lectura en `scripts/build_x64.py` (manejo defensivo de sandbox EROFS sin fallar `npm test`).
-  - Sincronización de estado fullscreen nativo y DOM en `UpdateNativeImmersiveMode()` y `CaptureFloatingCycleProbeAsync()` (`window.__ttNativeFullscreen`).
-  - Robustecimiento de `scripts/ci_windows_floating_cycle.ps1` para discriminar honestamente limitaciones de IP anónima en runners de datacenter vs fallos de código.
-  - Fortalecimiento de pruebas de regresión DOM y ciclo en `scripts/test_floating_player.js` (30/30 checks).
+  - El empaquetador `scripts/build_x64.py` conserva la obligación de escribir y verificar artefactos nuevos; un filesystem de solo lectura constituye un FAIL verificable y no un empaquetado exitoso.
+  - Registro explícito de comprobaciones de píxeles (`pixelChecks`) en el resumen del probe y aserción de las 5 capturas PNG en `scripts/ci_windows_floating_cycle.ps1`.
+  - Distinción rigurosa entre fixture de streaming local y decodificación remota de YouTube en la evidencia y veredicto.
 
 ### Prueba independiente de conectividad (preparada, pendiente de CI)
 
@@ -62,6 +63,25 @@ La segunda versión de la prueba también guarda cinco capturas PNG reales
 de `CoreWebView2.CapturePreviewAsync` y verifica un píxel central no negro
 en cada etapa. Es una comprobación limitada de superficie visible en el
 fixture local; no se extrapola al streaming de YouTube.
+
+**Evidencia observada del run Windows 40140104918 (commit e77f4a3):**
+el paso del fixture offline terminó PASS, con `readyState=4`,
+`videoWidth=640`, `paused=false` en todas las etapas y avance de
+`currentTime` 10,02 → 11,28 → 13,55 → 15,13 → 16,71 segundos. Las cinco
+capturas se descargaron del artefacto `windows-youtube-experience-e2e`.
+Muestras de píxel central RGB:
+`normal=(106,138,100)`, `cine=(93,118,134)`,
+`flotante=(40,87,32)`, `fullscreen=(42,74,95)`,
+`retorno=(93,118,134)`. Son datos de la prueba *local*; no se atribuyen
+a YouTube. El workflow general terminó FAIL por navegación/reproducción
+de YouTube, después del paso offline correcto.
+
+La validación offline se separó también en
+`.github/workflows/windows-offline-floating-e2e.yml` para que su resultado
+de compilación, reproducción y capturas en Windows sea visible sin quedar
+oculto por el fallo independiente de YouTube. La prueba exige expresamente
+el resumen `PASS_LOCAL_MEDIA_FIXTURE`, los cinco PNG y los cinco registros
+de color no negro; no cambia el bloqueo de publicación.
 
 Los workflows anteriores compilaban el host pero fallaban en reproducción:
 el E2E no pudo abrir el primer vídeo desde la portada; el control
