@@ -15,6 +15,7 @@ $proof=Join-Path $dir 'titlebar-acceptance.json'
 if (!(Test-Path $proof)) { throw 'TITLEBAR_PROOF_MISSING' }
 $result=Get-Content $proof -Raw -Encoding utf8 | ConvertFrom-Json
 if (!$result.oneBar -or !$result.webviewBelowBar -or !$result.nativeTaskbarMinimize -or
+    !$result.maximizedClientFillsWorkArea -or
     !$result.maximized -or !$result.restored -or !$result.minimized -or
     $result.border -ne 'None' -or $result.height -ne 38) {
   throw "TITLEBAR_WINDOW_ACTIONS_FAILED:$($result | ConvertTo-Json -Compress)"

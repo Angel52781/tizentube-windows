@@ -42,6 +42,8 @@ export class ModLoader {
     this._mountAttempts = 0;
     this._mountEventHandler = null;
     this._viewingMountReported = false;
+    this._fallbackVideoTimer = null;
+    this._fallbackVideoHandler = null;
   }
 
   /**
@@ -104,6 +106,27 @@ export class ModLoader {
     }
     retryMount();
 
+    // SponsorBlock is a playback feature, not a custom-UI feature. If the
+    // injected settings/HUD cannot mount in a changed YouTube layout, still
+    // fetch segments for the active video and let the headless playback
+    // listener perform skips. AppUI remains the owner once it has mounted.
+    this._fallbackVideoHandler = () => {
+      if (this.ui?.isMounted || typeof window === 'undefined') return;
+      const id = String(window.location?.href || '')
+        .match(/[?&]v=([a-zA-Z0-9_-]{11})(?:[&#]|$)/)?.[1];
+      if (id && id !== this.sponsorblock.currentVideoId)
+        void this.sponsorblock.setVideo(id);
+    };
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('yt-navigate-finish', this._fallbackVideoHandler);
+      window.addEventListener('popstate', this._fallbackVideoHandler);
+    }
+    if (typeof setInterval === 'function') {
+      this._fallbackVideoTimer = setInterval(this._fallbackVideoHandler, 2500);
+      this._fallbackVideoTimer?.unref?.();
+    }
+    this._fallbackVideoHandler();
+
     // 4. Setup IPC commands from Native Host
     this.ipc.on('playback:command', (payload) => {
       if (!payload || !payload.action) return;
@@ -151,6 +174,11 @@ export class ModLoader {
    * Cleans up all mod listeners, timers, caches, and injected DOM elements.
    */
   dispose() {
+    if (this._fallbackVideoTimer) clearInterval(this._fallbackVideoTimer);
+    if (this._fallbackVideoHandler && typeof window !== 'undefined') {
+      window.removeEventListener?.('yt-navigate-finish', this._fallbackVideoHandler);
+      window.removeEventListener?.('popstate', this._fallbackVideoHandler);
+    }
     if (this._mountRetryTimer) clearTimeout(this._mountRetryTimer);
     if (this._mountEventHandler && typeof window !== 'undefined') {
       window.removeEventListener?.('DOMContentLoaded', this._mountEventHandler);

@@ -1,5 +1,12 @@
 # TizenTube Windows — prueba personal (v0.1.0-preview.13)
 
+## Cambios de preview.14 (rama de pruebas, todavía sin release)
+
+- **Actualizaciones**: botón nativo `Actualizar` en la parte superior; búsqueda automática silenciosa al iniciar. Solo consulta versiones publicadas en `Angel52781/tizentube-windows`. Solicita permiso antes de descargar, verifica `SHA256SUMS.txt` y el SHA-256 real, y puede reemplazar la carpeta portable `TizenTube-Windows-x64` tras cerrar la app. El ejecutable se actualiza desde una copia temporal independiente, conservando una carpeta de respaldo para revertir. Las preferencias y el perfil permanecen en `%LOCALAPPDATA%\TizenTube`. Un EXE suelto fuera de la carpeta portable abre la descarga oficial, sin sobrescribir otras carpetas.
+- **Protecciones**: botón nativo `Protecciones` muestra el estado real de SponsorBlock, salto automático, cantidad de segmentos del vídeo y AdBlock. Permite abrir la configuración. Si la UI personalizada de YouTube no se monta, el cargador intenta igualmente consultar SponsorBlock y saltar segmentos.
+- **Bordes de pantalla**: corrección de `WM_NCCALCSIZE` al maximizar o entrar en fullscreen para eliminar el borde invisible de `WS_THICKFRAME`. La validación de Windows mide que el rectángulo cliente maximizado coincida con el área de trabajo. La apariencia real en el equipo del usuario queda por verificar.
+- **Limitaciones**: no se garantiza que todos los anuncios ni todos los segmentos comunitarios sean bloqueados; la API SponsorBlock y la estructura de YouTube pueden cambiar. El autoactualizador todavía necesita prueba de instalación/reemplazo en Windows antes de afirmar que funciona completamente. Este build **no** aparece en la búsqueda de actualizaciones hasta que exista una release oficial más reciente.
+
 Este es un **prototipo de escritorio no oficial**, todavía en pruebas. Abre YouTube mediante Microsoft Edge WebView2 en una ventana propia; **no reproduce exactamente la interfaz de la aplicación Android/Chromecast**. La integración real de bloqueo de anuncios, SponsorBlock y DeArrow puede presentar fallos por cambios de YouTube. No se garantiza su funcionamiento en todos los vídeos.
 
 ## Instalación en Windows 10/11 (x64)

@@ -202,6 +202,10 @@ namespace TizenTubeWindows
             catch { }
 
             var options = HostOptions.Parse(args);
+            // A detached copy of the same signed-by-source portable executable
+            // performs replacement only after the original process exits.
+            if (args?.Length == 5 && args[0] == "--apply-update")
+                return PortableUpdater.ApplyVerifiedUpdate(args[1], args[2], args[3], args[4]);
             if (options.ShowHelp)
             {
                 HostOptions.PrintHelp();
@@ -241,6 +245,7 @@ namespace TizenTubeWindows
         [DllImport("user32.dll", SetLastError = true)]
         private static extern int GetWindowLong(IntPtr hwnd, int index);
         private const int WmNcHitTest = 0x0084;
+        private const int WmNcCalcSize = 0x0083;
         private const int WmNcLButtonDown = 0x00A1;
         private const int HtClient = 1;
         private const int HtCaption = 2;
@@ -415,6 +420,13 @@ namespace TizenTubeWindows
                 navigationToolbar?.SetMaximized(WindowState == FormWindowState.Maximized);
             };
 
+            if (!this.options.SmokeTest && !this.options.HeadlessMode)
+                this.Shown += async (s, e) => {
+                    await Task.Delay(3500);
+                    if (!IsDisposed && !nativeFloatingActive)
+                        await PortableUpdater.CheckForUpdatesAsync(this, true);
+                };
+
             InitializeWebView();
             SetupMemoryTrimming();
 
@@ -536,6 +548,12 @@ namespace TizenTubeWindows
                     bool maximized = WindowState == FormWindowState.Maximized &&
                         navigationToolbar.IsMaximized &&
                         MaximizedBounds == Screen.FromControl(this).WorkingArea;
+                    // The screenshot showed a thin desktop-colored frame.
+                    // Test the HWND client origin, not just WinForms state.
+                    var client = new Rectangle(PointToScreen(ClientRectangle.Location),
+                        ClientRectangle.Size);
+                    bool maximizedClientFillsWorkArea =
+                        client == Screen.FromControl(this).WorkingArea;
                     navigationToolbar.InvokeMaximizeForProbe();
                     await Task.Delay(300);
                     bool restored = WindowState == FormWindowState.Normal &&
@@ -551,13 +569,17 @@ namespace TizenTubeWindows
                         bitmap.Save(Path.Combine(folder, "titlebar-integrated.png"),
                             System.Drawing.Imaging.ImageFormat.Png);
                     }
-                    var proof = new { oneBar, maximized, restored, minimized,
+                    var proof = new { oneBar, maximized, maximizedClientFillsWorkArea,
+                        maxClient = client.ToString(),
+                        workArea = Screen.FromControl(this).WorkingArea.ToString(),
+                        restored, minimized,
                         webviewBelowBar, nativeTaskbarMinimize,
                         height = navigationToolbar.Height, border = FormBorderStyle.ToString() };
                     File.WriteAllText(Path.Combine(folder, "titlebar-acceptance.json"),
                         System.Text.Json.JsonSerializer.Serialize(proof));
                     if (!oneBar || !webviewBelowBar || !nativeTaskbarMinimize ||
-                        !maximized || !restored || !minimized) ExitCode = 12;
+                        !maximized || !maximizedClientFillsWorkArea ||
+                        !restored || !minimized) ExitCode = 12;
                     Console.WriteLine($"[Titlebar] oneBar={oneBar} maximized={maximized} restored={restored} minimized={minimized}");
                 };
             }
@@ -622,12 +644,47 @@ namespace TizenTubeWindows
                 () => { WindowState = FormWindowState.Minimized; },
                 ToggleNativeMaximize,
                 () => { Close(); },
-                () => { _ = ToggleFloatingWindowAsync(true); });
+                () => { _ = ToggleFloatingWindowAsync(true); },
+                () => { _ = ShowProtectionsAsync(); },
+                () => { _ = PortableUpdater.CheckForUpdatesAsync(this, false); });
             navigationToolbar.Dock = DockStyle.Fill;
             navigationToolbar.Margin = Padding.Empty;
             chromeLayout.Controls.Add(navigationToolbar, 0, 0);
             navigationToolbar.SetMaximized(WindowState == FormWindowState.Maximized);
             UpdateNavigationToolbarVisibility();
+        }
+
+        private async Task ShowProtectionsAsync()
+        {
+            if (webView?.CoreWebView2 == null)
+            {
+                MessageBox.Show("El navegador todavía está iniciándose.", "TizenTube");
+                return;
+            }
+            try
+            {
+                // Read the actual initialized JS module, never infer enabled
+                // status from bundle presence or the presence of a badge.
+                string info = await webView.CoreWebView2.ExecuteScriptAsync(
+                    "(() => {const l=window.__TIZENTUBE_LOADER__;" +
+                    "if(!l?.initialized)return 'Los módulos todavía no están activos';" +
+                    "const s=l.sponsorblock;const a=l.adblock;" +
+                    "return 'SponsorBlock: '+(s?.options?.enabled?'activo':'desactivado')+" +
+                    "'\\nSaltar segmentos automáticamente: '+(s?.options?.autoSkip?'sí':'no')+" +
+                    "'\\nSegmentos del vídeo: '+(s?.currentSegments?.length??0)+" +
+                    "'\\nAdBlock: '+(a?.options?.enabled?'activo':'desactivado');})()");
+                string state = System.Text.Json.JsonSerializer.Deserialize<string>(info)
+                    ?? "No se pudo leer el estado.";
+                if (MessageBox.Show(state + "\n\n¿Abrir ajustes de protecciones?", "Protecciones TizenTube",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                    await webView.CoreWebView2.ExecuteScriptAsync(
+                        "window.__TIZENTUBE_LOADER__?.ui?.settingsModal?.open?.();");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("No se pudo consultar SponsorBlock: " + ex.Message,
+                    "TizenTube", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         private void DragNativeWindow()
@@ -929,6 +986,17 @@ namespace TizenTubeWindows
 
         protected override void WndProc(ref Message m)
         {
+            // The WS_THICKFRAME retained for resize/Aero Snap leaves an
+            // invisible non-client inset on maximized borderless windows.
+            // Its ~8px gap is visible in the user's screenshot. Keep normal
+            // resize grips, but consume the whole available surface here.
+            if (m.Msg == WmNcCalcSize && m.WParam != IntPtr.Zero &&
+                FormBorderStyle == FormBorderStyle.None &&
+                (WindowState == FormWindowState.Maximized || nativeImmersiveActive))
+            {
+                m.Result = IntPtr.Zero;
+                return;
+            }
             if (m.Msg == WmHotKey && m.WParam.ToInt32() == FloatingHotKeyId)
             {
                 Interlocked.Increment(ref floatingHotKeyWindowsTriggered);

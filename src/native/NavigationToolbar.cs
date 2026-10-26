@@ -17,6 +17,8 @@ namespace TizenTubeWindows
         private readonly GlyphButton maximize;
         private readonly GlyphButton close;
         private readonly GlyphButton restoreFloating;
+        private readonly Button protections;
+        private readonly Button updates;
         private readonly PictureBox appIcon;
         private readonly Label title;
         private readonly ToolTip tips = new ToolTip();
@@ -27,7 +29,8 @@ namespace TizenTubeWindows
 
         public NavigationToolbar(Icon icon, Action navigateBack, Action reloadPage,
             Action drag, Action minimizeWindow, Action maximizeWindow, Action closeWindow,
-            Action restoreFloatingAction = null)
+            Action restoreFloatingAction = null, Action openProtections = null,
+            Action checkUpdates = null)
         {
             dragWindow = drag;
             toggleMaximize = maximizeWindow;
@@ -78,6 +81,28 @@ namespace TizenTubeWindows
                 AccessibleName = "Volver a la ventana principal",
                 Visible = false
             };
+            protections = new Button {
+                Text = "Protecciones",
+                Size = new Size(105, 28),
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = Color.FromArgb(230, 230, 230),
+                BackColor = Color.FromArgb(40, 40, 40),
+                Font = new Font("Segoe UI", 8f),
+                AccessibleName = "Estado y ajustes de SponsorBlock y AdBlock",
+                TabStop = true
+            };
+            protections.FlatAppearance.BorderSize = 0;
+            updates = new Button {
+                Text = "Actualizar",
+                Size = new Size(85, 28),
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = Color.White,
+                BackColor = Color.FromArgb(45, 45, 45),
+                Font = new Font("Segoe UI", 8f),
+                AccessibleName = "Comprobar actualizaciones de TizenTube Windows",
+                TabStop = true
+            };
+            updates.FlatAppearance.BorderSize = 0;
 
             back.Click += (s, e) => navigateBack?.Invoke();
             reload.Click += (s, e) => reloadPage?.Invoke();
@@ -85,6 +110,8 @@ namespace TizenTubeWindows
             maximize.Click += (s, e) => maximizeWindow?.Invoke();
             close.Click += (s, e) => closeWindow?.Invoke();
             restoreFloating.Click += (s, e) => restoreFloatingAction?.Invoke();
+            protections.Click += (s, e) => openProtections?.Invoke();
+            updates.Click += (s, e) => checkUpdates?.Invoke();
 
             tips.SetToolTip(back, "Atrás (Alt + ←)");
             tips.SetToolTip(reload, "Recargar (Ctrl + R)");
@@ -92,12 +119,16 @@ namespace TizenTubeWindows
             tips.SetToolTip(maximize, "Maximizar / Restaurar");
             tips.SetToolTip(close, "Cerrar");
             tips.SetToolTip(restoreFloating, "Volver a la ventana normal (F9)");
+            tips.SetToolTip(protections, "SponsorBlock / AdBlock: ver estado y abrir ajustes");
+            tips.SetToolTip(updates, "Buscar una versión publicada y actualizar con confirmación");
 
             Controls.Add(appIcon);
             Controls.Add(back);
             Controls.Add(reload);
             Controls.Add(title);
             Controls.Add(restoreFloating);
+            Controls.Add(protections);
+            Controls.Add(updates);
             Controls.Add(minimize);
             Controls.Add(maximize);
             Controls.Add(close);
@@ -115,6 +146,8 @@ namespace TizenTubeWindows
             int right = ClientSize.Width;
             if (isFloatingMode)
             {
+                protections.Visible = false;
+                updates.Visible = false;
                 close.Size = new Size(34, ChromeHeight);
                 restoreFloating.Size = new Size(34, ChromeHeight);
                 minimize.Size = new Size(34, ChromeHeight);
@@ -125,13 +158,17 @@ namespace TizenTubeWindows
             }
             else
             {
+                protections.Visible = true;
+                updates.Visible = true;
                 close.Size = new Size(CaptionButtonWidth, ChromeHeight);
                 maximize.Size = new Size(CaptionButtonWidth, ChromeHeight);
                 minimize.Size = new Size(CaptionButtonWidth, ChromeHeight);
                 close.Location = new Point(right - CaptionButtonWidth, 0);
                 maximize.Location = new Point(right - CaptionButtonWidth * 2, 0);
                 minimize.Location = new Point(right - CaptionButtonWidth * 3, 0);
-                title.Width = Math.Max(0, right - CaptionButtonWidth * 3 - title.Left - 5);
+                updates.Location = new Point(right - CaptionButtonWidth * 3 - updates.Width - 8, 5);
+                protections.Location = new Point(updates.Left - protections.Width - 6, 5);
+                title.Width = Math.Max(0, protections.Left - title.Left - 10);
             }
         }
 
