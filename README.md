@@ -1,12 +1,14 @@
 # TizenTube Windows
 
-[![Descargar TizenTube Windows — ZIP portable](https://img.shields.io/badge/%E2%AC%87%20DESCARGAR-Windows%2010%2F11%20x64-087fca?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.13/TizenTube-Windows-x64-v0.1.0-preview.13.zip)
+[![Descargar TizenTube Windows — ZIP portable](https://img.shields.io/badge/%E2%AC%87%20DESCARGAR-Windows%2010%2F11%20x64-087fca?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.16/TizenTube-Windows-x64-v0.1.0-preview.16.zip)
 
-**[Descarga directa para Windows (versión de prueba)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.13/TizenTube-Windows-x64-v0.1.0-preview.13.zip)** · [Instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md) · [Todas las versiones](https://github.com/Angel52781/tizentube-windows/releases)
+**[Descarga directa para Windows (versión de prueba)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.16/TizenTube-Windows-x64-v0.1.0-preview.16.zip)** · [Instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md) · [Todas las versiones](https://github.com/Angel52781/tizentube-windows/releases)
 
 > **¿Windows muestra «Windows protegió su PC»?** Esta versión de prueba todavía no tiene firma digital de un editor reconocido. Consulta [por qué sucede y las opciones de firma](docs/SMARTSCREEN_AND_SIGNING.md). No implica por sí mismo que el archivo sea malicioso; verifica siempre el origen y el SHA-256.
 
-**Descarga para probar en Windows 10/11 x64:** [Releases / v0.1.0-preview.13](https://github.com/Angel52781/tizentube-windows/releases/tag/v0.1.0-preview.13). Descargar el ZIP de **Assets**, extraer toda la carpeta y ejecutar `TizenTubeHost.exe`. Ver [instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md).
+**Descarga para probar en Windows 10/11 x64:** [Releases / v0.1.0-preview.16](https://github.com/Angel52781/tizentube-windows/releases/tag/v0.1.0-preview.16). Descargar el ZIP de **Assets**, extraer toda la carpeta y ejecutar `TizenTubeHost.exe`. Ver [instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md).
+
+**Actualizaciones desde preview.16:** se desarrollan cambios en main y se publican Releases verificadas para que la app las detecte sin consultar GitHub Actions. Preview.15 tenía un defecto al iniciar el proceso auxiliar de sustitución y necesitará una última actualización manual a preview.16; después, el nuevo proceso auxiliar se comprueba en Windows junto a sus dependencias .NET.
 
 **Preview.13 — controles del teclado verificados en GitHub Actions Windows:** las flechas izquierda/derecha avanzan o retroceden **5 segundos** (sin salto duplicado); la barra espaciadora pausa y reanuda vídeos. Se conservan los atajos nativos para modo cine, subtítulos y minirreproductor. [Pruebas Windows E2E](https://github.com/Angel52781/tizentube-windows/actions/runs/40117251531) y [validación del ejecutable portable](https://github.com/Angel52781/tizentube-windows/actions/runs/40117251477) aprobadas para el commit `7b0a85f`. **Sigue siendo una preview no oficial; los anuncios, SponsorBlock, DeArrow y bajo consumo de RAM no están garantizados.**
 

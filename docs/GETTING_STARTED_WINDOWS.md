@@ -1,4 +1,12 @@
-# TizenTube Windows — prueba personal (v0.1.0-preview.13)
+# TizenTube Windows — prueba personal (v0.1.0-preview.16)
+
+## Canal único para nuevas versiones
+
+La única rama de desarrollo permanente es main. Las actualizaciones de la aplicación vienen de GitHub Releases publicadas desde main, no de artefactos temporales de GitHub Actions. Al iniciar TizenTube se comprueban las nuevas Releases y se pide confirmación antes de sustituir la aplicación. También se puede pulsar Actualizar.
+
+La descarga se verifica mediante SHA256SUMS.txt, la instalación antigua se conserva como respaldo y el perfil de YouTube se mantiene fuera de la carpeta del programa.
+
+**Transición excepcional:** preview.15 tenía un fallo en su proceso auxiliar de actualización, que copiaba el ejecutable sin sus dependencias .NET. Por tanto, quienes todavía usen preview.15 deben instalar preview.16 manualmente una última vez. Preview.16 integra sus dependencias al ejecutar el actualizador y valida su arranque por separado en Windows. La sustitución entre dos versiones reales seguirá pendiente de una prueba integral.
 
 ## Preview.15 — corrección de regresiones reportadas
 
