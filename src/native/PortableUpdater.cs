@@ -16,7 +16,7 @@ namespace TizenTubeWindows
 {
     internal static class PortableUpdater
     {
-        private const int CurrentPreview = 14;
+        private const int CurrentPreview = 15;
         private const string Api = "https://api.github.com/repos/Angel52781/tizentube-windows/releases?per_page=30";
         private const string ZipPrefix = "TizenTube-Windows-x64-v0.1.0-preview.";
         private const string PortableFolder = "TizenTube-Windows-x64";

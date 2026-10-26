@@ -57,8 +57,9 @@ try {
     'Custom maximize/restore retains Windows taskbar bounds');
   assert.ok(host.includes('chromeLayout.RowStyles[0].Height = visible ? 38 : 0'),
     'Chrome reserves 38 px normally and none in fullscreen');
-  assert.ok(host.includes('WsMinimizeBox | WsMaximizeBox | WsThickFrame'),
-    'Windows retains shell taskbar minimize/restore protocol');
+  assert.ok(host.includes('WsSysMenu | WsMinimizeBox | WsMaximizeBox') &&
+    !host.includes('cp.Style |= WsSysMenu | WsMinimizeBox | WsMaximizeBox | WsThickFrame'),
+    'Windows retains shell minimize/restore but does not enable duplicate thick-frame caption');
   assert.ok(host.includes('SessionSetupProbe') && host.includes('SessionRestoreProbe'),
     'The native acceptance suite can exercise continuity across independent Windows processes');
   assert.ok(!host.includes('await Task.Delay(4900);'),

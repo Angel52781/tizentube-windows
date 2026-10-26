@@ -1,5 +1,14 @@
 # TizenTube Windows — prueba personal (v0.1.0-preview.13)
 
+## Preview.15 — corrección de regresiones reportadas
+
+- Retira el estilo nativo WS_THICKFRAME y la intervención en WM_NCCALCSIZE que podían producir una barra nativa clara y duplicada sobre el encabezado oscuro. Conserva las áreas de redimensionamiento implementadas mediante hit tests personalizados.
+- La prueba CI inspecciona un píxel del **marco visible de la ventana en pantalla**, además del componente interno y la extensión real del cliente al maximizar; no basta con que el código de la barra dibuje colores correctos.
+- SponsorBlock sincroniza la identidad del vídeo cada 1,5 segundos para cambios de URL de YouTube que no emiten eventos SPA habituales. También comprueba el tiempo de reproducción como respaldo si el listener de eventos está conectado a un elemento antiguo; evita repetir saltos mediante UUID.
+- El botón **Protecciones** distingue activación, vídeo detectado, reproductor conectado, segmentos recibidos, fallos/límites de consulta y saltos realizados. **«Activo» no equivale a «segmentos detectados».**
+- Para una prueba controlada de SponsorBlock, un vídeo con segmentos conocidos es https://www.youtube.com/watch?v=ifI_fwg55k8. La API devolvió segmentos de introducción [0,2.811777] y [24.182026,39.86125] en la comprobación del 25 de octubre de 2026; esos datos comunitarios pueden cambiar.
+- Todavía falta comprobar visualmente las dos correcciones en una sesión física del usuario. No se autoriza release oficial solo por CI verde.
+
 ## Cambios de preview.14 (rama de pruebas, todavía sin release)
 
 - **Actualizaciones**: botón nativo `Actualizar` en la parte superior; búsqueda automática silenciosa al iniciar. Solo consulta versiones publicadas en `Angel52781/tizentube-windows`. Solicita permiso antes de descargar, verifica `SHA256SUMS.txt` y el SHA-256 real, y puede reemplazar la carpeta portable `TizenTube-Windows-x64` tras cerrar la app. El ejecutable se actualiza desde una copia temporal independiente, conservando una carpeta de respaldo para revertir. Las preferencias y el perfil permanecen en `%LOCALAPPDATA%\TizenTube`. Un EXE suelto fuera de la carpeta portable abre la descarga oficial, sin sobrescribir otras carpetas.

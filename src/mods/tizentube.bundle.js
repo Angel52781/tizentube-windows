@@ -1239,6 +1239,9 @@ class SponsorBlockBase {
     // Circuit breaker state for external API outages
     this.consecutiveFailures = 0;
     this.circuitCooldownUntil = 0;
+    this.lastFetchStatus = 'no_video';
+    this.lastFetchTime = 0;
+    this.lastFetchError = null;
   }
 
   /**
@@ -1282,6 +1285,9 @@ class SponsorBlockBase {
     if (videoId === this.currentVideoId && this.currentSegments.length > 0) return;
 
     this.currentVideoId = videoId;
+    this.lastFetchStatus = 'loading';
+    this.lastFetchTime = Date.now();
+    this.lastFetchError = null;
     this.currentSegments = [];
     this.alreadySkippedSegments.clear();
 
@@ -1293,11 +1299,17 @@ class SponsorBlockBase {
       // to the next video. Never associate stale sponsor segments with it.
       if (videoId === this.currentVideoId && this.options.enabled) {
         this.currentSegments = segments;
+        if (!['network_error', 'rate_limited', 'unavailable'].includes(this.lastFetchStatus))
+          this.lastFetchStatus = segments.length ? 'segments_found' : 'no_segments';
       }
     } catch (err) {
       // SponsorBlock API downtime must never break video playback (fail-open)
       console.warn(`[SponsorBlock] Query failed for ${videoId} (fail-open):`, err.message);
-      if (videoId === this.currentVideoId) this.currentSegments = [];
+      if (videoId === this.currentVideoId) {
+        this.currentSegments = [];
+        this.lastFetchStatus = 'network_error';
+        this.lastFetchError = String(err?.message || err).slice(0, 140);
+      }
     }
   }
 
@@ -1323,6 +1335,7 @@ class SponsorBlockBase {
     // Circuit breaker: fail-open immediately if API is in cooldown after repeated outages
     const now = Date.now();
     if (this.circuitCooldownUntil > now) {
+      this.lastFetchStatus = 'unavailable';
       return [];
     }
 
@@ -1355,12 +1368,14 @@ class SponsorBlockBase {
                 // No segments exist for this video - cache empty array to avoid redundant queries
                 this.setCache(videoId, []);
                 this.consecutiveFailures = 0;
+                this.lastFetchStatus = 'no_segments';
                 return [];
               }
               if (res.status === 429) {
                 // Rate limit encountered: trip circuit breaker with longer backoff
                 this.consecutiveFailures = this.options.circuitBreakerThreshold;
                 this.circuitCooldownUntil = Date.now() + Math.max(60000, this.options.circuitCooldownMs * 2);
+                this.lastFetchStatus = 'rate_limited';
                 return [];
               }
               throw new Error(`HTTP ${res.status}`);
@@ -1375,6 +1390,8 @@ class SponsorBlockBase {
 
             if (!Array.isArray(data)) {
               this.setCache(videoId, []);
+              this.lastFetchStatus = 'network_error';
+              this.lastFetchError = 'Respuesta de API no válida';
               return [];
             }
 
@@ -1400,6 +1417,7 @@ class SponsorBlockBase {
             this.consecutiveFailures = 0;
             this.circuitCooldownUntil = 0;
             this.fallbackUsed = (baseUrl !== this.options.apiUrl);
+            this.lastFetchStatus = segments.length ? 'segments_found' : 'no_segments';
             if (this.fallbackUsed) {
               this.fallbackUsedCount = (this.fallbackUsedCount || 0) + 1;
               console.info(`[SponsorBlock] Fallback mirror succeeded for ${videoId} using ${baseUrl}`);
@@ -1412,6 +1430,8 @@ class SponsorBlockBase {
               continue;
             }
             this.consecutiveFailures++;
+            this.lastFetchStatus = 'network_error';
+            this.lastFetchError = String(err?.message || err).slice(0, 140);
             if (this.consecutiveFailures >= this.options.circuitBreakerThreshold) {
               this.circuitCooldownUntil = Date.now() + this.options.circuitCooldownMs;
             }
@@ -1555,6 +1575,9 @@ class SponsorBlockBase {
       autoSkip: this.options.autoSkip,
       categories: [...this.options.categories],
       currentVideoId: this.currentVideoId,
+      lastFetchStatus: this.lastFetchStatus,
+      lastFetchTime: this.lastFetchTime,
+      lastFetchError: this.lastFetchError,
       segmentCount: this.currentSegments.length,
       cachedVideosCount: this.cache.size,
       skipCount: this.skipCount,
@@ -4704,18 +4727,45 @@ class ModLoader {
     // fetch segments for the active video and let the headless playback
     // listener perform skips. AppUI remains the owner once it has mounted.
     this._fallbackVideoHandler = () => {
-      if (this.ui?.isMounted || typeof window === 'undefined') return;
+      if (typeof window === 'undefined') return;
+      // YouTube may use history.replaceState without firing a normal
+      // navigation or yt-navigate-finish event. Keep AppUI's video ID in sync
+      // rather than relying on a one-time listener.
+      if (this.ui?.isMounted) this.ui._checkUrl?.();
       const id = String(window.location?.href || '')
         .match(/[?&]v=([a-zA-Z0-9_-]{11})(?:[&#]|$)/)?.[1];
-      if (id && id !== this.sponsorblock.currentVideoId)
+      if (id && id !== this.sponsorblock.currentVideoId && !this.ui?.isMounted)
         void this.sponsorblock.setVideo(id);
+
+      // WebView2/YouTube occasionally replaces the player while a prior
+      // timeupdate listener remains attached to an old video. Supplement
+      // event-driven skipping with a bounded 1.5s check of the real HTML5
+      // video. The SponsorBlock UUID set prevents duplicate skips.
+      if (!id || id !== this.sponsorblock.currentVideoId) return;
+      const video = this.playback?.videoElement
+        || (typeof document !== 'undefined'
+          ? document.querySelector?.('video.html5-main-video') : null);
+      if (!video || !Number.isFinite(video.currentTime) || video.readyState < 2)
+        return;
+      const target = this.sponsorblock.checkSkip(video.currentTime);
+      if (target === null) return;
+      if (this.ui?.isMounted && this.ui.handleSponsorBlockSkip) {
+        this.ui.handleSponsorBlockSkip(this.sponsorblock.lastSkipped || { targetTime: target });
+      } else {
+        if (this.playback?.videoElement === video) this.playback.seekTo(target);
+        else video.currentTime = target;
+        this.ipc.send('sponsorblock:skipped', {
+          videoId: id, targetTime: target,
+          category: this.sponsorblock.lastSkipped?.category
+        });
+      }
     };
     if (typeof window !== 'undefined' && window.addEventListener) {
       window.addEventListener('yt-navigate-finish', this._fallbackVideoHandler);
       window.addEventListener('popstate', this._fallbackVideoHandler);
     }
     if (typeof setInterval === 'function') {
-      this._fallbackVideoTimer = setInterval(this._fallbackVideoHandler, 2500);
+      this._fallbackVideoTimer = setInterval(this._fallbackVideoHandler, 1500);
       this._fallbackVideoTimer?.unref?.();
     }
     this._fallbackVideoHandler();

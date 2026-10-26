@@ -14,7 +14,8 @@ if ($process.ExitCode -ne 0) { throw "TITLEBAR_HOST_EXIT_$($process.ExitCode)" }
 $proof=Join-Path $dir 'titlebar-acceptance.json'
 if (!(Test-Path $proof)) { throw 'TITLEBAR_PROOF_MISSING' }
 $result=Get-Content $proof -Raw -Encoding utf8 | ConvertFrom-Json
-if (!$result.oneBar -or !$result.webviewBelowBar -or !$result.nativeTaskbarMinimize -or
+if (!$result.oneBar -or !$result.noNativeCaptionOverlay -or
+    !$result.webviewBelowBar -or !$result.nativeTaskbarMinimize -or
     !$result.maximizedClientFillsWorkArea -or
     !$result.maximized -or !$result.restored -or !$result.minimized -or
     $result.border -ne 'None' -or $result.height -ne 38) {

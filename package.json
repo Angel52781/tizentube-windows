@@ -1,6 +1,6 @@
 {
   "name": "tizentube-windows",
-  "version": "0.1.0-preview.14",
+  "version": "0.1.0-preview.15",
   "description": "Lightweight, privacy-respecting YouTube client for Windows x64 with low memory consumption and TizenTube features",
   "main": "src/core/process_manager.js",
   "type": "module",

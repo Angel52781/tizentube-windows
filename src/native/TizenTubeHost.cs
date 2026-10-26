@@ -245,7 +245,6 @@ namespace TizenTubeWindows
         [DllImport("user32.dll", SetLastError = true)]
         private static extern int GetWindowLong(IntPtr hwnd, int index);
         private const int WmNcHitTest = 0x0084;
-        private const int WmNcCalcSize = 0x0083;
         private const int WmNcLButtonDown = 0x00A1;
         private const int HtClient = 1;
         private const int HtCaption = 2;
@@ -261,15 +260,17 @@ namespace TizenTubeWindows
         private const int WsSysMenu = 0x00080000;
         private const int WsMinimizeBox = 0x00020000;
         private const int WsMaximizeBox = 0x00010000;
-        private const int WsThickFrame = 0x00040000;
-        // Taskbar-click toggling requires a genuine minimizable system window,
-        // even though its top caption is rendered in our own toolbar.
+        // Taskbar-click toggling requires the system-menu and minimize styles.
+        // Do NOT add WS_THICKFRAME to a FormBorderStyle.None window: mixing a
+        // WinForms nonclient region with the thick frame rendered a second,
+        // Windows-colored system caption over our dark integrated toolbar.
+        // Resize grips are supplied by ApplyBorderlessHitTest below.
         protected override CreateParams CreateParams
         {
             get
             {
                 var cp = base.CreateParams;
-                cp.Style |= WsSysMenu | WsMinimizeBox | WsMaximizeBox | WsThickFrame;
+                cp.Style |= WsSysMenu | WsMinimizeBox | WsMaximizeBox;
                 return cp;
             }
         }
@@ -543,6 +544,20 @@ namespace TizenTubeWindows
                     bool oneBar = FormBorderStyle == FormBorderStyle.None &&
                         navigationToolbar.Visible && navigationToolbar.Height == 38 &&
                         chromeLayout.Controls.Contains(navigationToolbar);
+                    // The toolbar's own DrawToBitmap can be dark while the
+                    // *actual* screen still contains a light Windows caption
+                    // above it. Sample the composed screen at window y+9.
+                    Color topScreenPixel;
+                    using (var realFrame = new Bitmap(1, 1))
+                    using (var graphics = Graphics.FromImage(realFrame))
+                    {
+                        graphics.CopyFromScreen(Left + 155, Top + 9, 0, 0,
+                            new Size(1, 1), CopyPixelOperation.SourceCopy);
+                        topScreenPixel = realFrame.GetPixel(0, 0);
+                    }
+                    bool noNativeCaptionOverlay =
+                        topScreenPixel.R < 95 && topScreenPixel.G < 95 &&
+                        topScreenPixel.B < 95;
                     navigationToolbar.InvokeMaximizeForProbe();
                     await Task.Delay(300);
                     bool maximized = WindowState == FormWindowState.Maximized &&
@@ -569,7 +584,9 @@ namespace TizenTubeWindows
                         bitmap.Save(Path.Combine(folder, "titlebar-integrated.png"),
                             System.Drawing.Imaging.ImageFormat.Png);
                     }
-                    var proof = new { oneBar, maximized, maximizedClientFillsWorkArea,
+                    var proof = new { oneBar, noNativeCaptionOverlay,
+                        topScreenPixel = new { topScreenPixel.R, topScreenPixel.G, topScreenPixel.B },
+                        maximized, maximizedClientFillsWorkArea,
                         maxClient = client.ToString(),
                         workArea = Screen.FromControl(this).WorkingArea.ToString(),
                         restored, minimized,
@@ -577,7 +594,8 @@ namespace TizenTubeWindows
                         height = navigationToolbar.Height, border = FormBorderStyle.ToString() };
                     File.WriteAllText(Path.Combine(folder, "titlebar-acceptance.json"),
                         System.Text.Json.JsonSerializer.Serialize(proof));
-                    if (!oneBar || !webviewBelowBar || !nativeTaskbarMinimize ||
+                    if (!oneBar || !noNativeCaptionOverlay ||
+                        !webviewBelowBar || !nativeTaskbarMinimize ||
                         !maximized || !maximizedClientFillsWorkArea ||
                         !restored || !minimized) ExitCode = 12;
                     Console.WriteLine($"[Titlebar] oneBar={oneBar} maximized={maximized} restored={restored} minimized={minimized}");
@@ -669,9 +687,18 @@ namespace TizenTubeWindows
                     "(() => {const l=window.__TIZENTUBE_LOADER__;" +
                     "if(!l?.initialized)return 'Los módulos todavía no están activos';" +
                     "const s=l.sponsorblock;const a=l.adblock;" +
+                    "const st=s?.getStats?.()||{};const v=l.playback?.videoElement;" +
+                    "const labels={no_video:'sin vídeo detectado',loading:'consultando API'," +
+                    "segments_found:'segmentos recibidos',no_segments:'sin segmentos registrados'," +
+                    "network_error:'fallo al consultar API',rate_limited:'API con límite de solicitudes'," +
+                    "unavailable:'API temporalmente no disponible'};" +
                     "return ['SponsorBlock: '+(s?.options?.enabled?'activo':'desactivado')," +
                     "'Saltar segmentos automáticamente: '+(s?.options?.autoSkip?'sí':'no')," +
-                    "'Segmentos del vídeo: '+(s?.currentSegments?.length??0)," +
+                    "'Vídeo identificado: '+(st.currentVideoId||'ninguno')," +
+                    "'Reproductor conectado: '+(v?'sí':'no')," +
+                    "'Consulta: '+(labels[st.lastFetchStatus]||'desconocida')," +
+                    "'Segmentos del vídeo: '+(st.segmentCount??0)," +
+                    "'Saltos realizados: '+(st.skipCount??0)," +
                     "'AdBlock: '+(a?.options?.enabled?'activo':'desactivado')].join(String.fromCharCode(10));})()");
                 string state = System.Text.Json.JsonSerializer.Deserialize<string>(info)
                     ?? "No se pudo leer el estado.";
@@ -986,16 +1013,9 @@ namespace TizenTubeWindows
 
         protected override void WndProc(ref Message m)
         {
-            // The WS_THICKFRAME retained for resize/Aero Snap leaves an
-            // invisible non-client inset on maximized borderless windows.
-            // Its ~8px gap is visible in the user's screenshot. Keep normal
-            // resize grips, but consume the whole available surface here.
-            if (m.Msg == WmNcCalcSize && m.WParam != IntPtr.Zero &&
-                FormBorderStyle == FormBorderStyle.None)
-            {
-                m.Result = IntPtr.Zero;
-                return;
-            }
+            // Leave WM_NCCALCSIZE to WinForms. Forcing a zero nonclient area
+            // on a thick-frame window caused a native caption to reappear in
+            // preview.14 on real hardware. No WS_THICKFRAME is set anymore.
             if (m.Msg == WmHotKey && m.WParam.ToInt32() == FloatingHotKeyId)
             {
                 Interlocked.Increment(ref floatingHotKeyWindowsTriggered);

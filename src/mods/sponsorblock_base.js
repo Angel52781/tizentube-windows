@@ -78,6 +78,9 @@ export class SponsorBlockBase {
     // Circuit breaker state for external API outages
     this.consecutiveFailures = 0;
     this.circuitCooldownUntil = 0;
+    this.lastFetchStatus = 'no_video';
+    this.lastFetchTime = 0;
+    this.lastFetchError = null;
   }
 
   /**
@@ -121,6 +124,9 @@ export class SponsorBlockBase {
     if (videoId === this.currentVideoId && this.currentSegments.length > 0) return;
 
     this.currentVideoId = videoId;
+    this.lastFetchStatus = 'loading';
+    this.lastFetchTime = Date.now();
+    this.lastFetchError = null;
     this.currentSegments = [];
     this.alreadySkippedSegments.clear();
 
@@ -132,11 +138,17 @@ export class SponsorBlockBase {
       // to the next video. Never associate stale sponsor segments with it.
       if (videoId === this.currentVideoId && this.options.enabled) {
         this.currentSegments = segments;
+        if (!['network_error', 'rate_limited', 'unavailable'].includes(this.lastFetchStatus))
+          this.lastFetchStatus = segments.length ? 'segments_found' : 'no_segments';
       }
     } catch (err) {
       // SponsorBlock API downtime must never break video playback (fail-open)
       console.warn(`[SponsorBlock] Query failed for ${videoId} (fail-open):`, err.message);
-      if (videoId === this.currentVideoId) this.currentSegments = [];
+      if (videoId === this.currentVideoId) {
+        this.currentSegments = [];
+        this.lastFetchStatus = 'network_error';
+        this.lastFetchError = String(err?.message || err).slice(0, 140);
+      }
     }
   }
 
@@ -162,6 +174,7 @@ export class SponsorBlockBase {
     // Circuit breaker: fail-open immediately if API is in cooldown after repeated outages
     const now = Date.now();
     if (this.circuitCooldownUntil > now) {
+      this.lastFetchStatus = 'unavailable';
       return [];
     }
 
@@ -194,12 +207,14 @@ export class SponsorBlockBase {
                 // No segments exist for this video - cache empty array to avoid redundant queries
                 this.setCache(videoId, []);
                 this.consecutiveFailures = 0;
+                this.lastFetchStatus = 'no_segments';
                 return [];
               }
               if (res.status === 429) {
                 // Rate limit encountered: trip circuit breaker with longer backoff
                 this.consecutiveFailures = this.options.circuitBreakerThreshold;
                 this.circuitCooldownUntil = Date.now() + Math.max(60000, this.options.circuitCooldownMs * 2);
+                this.lastFetchStatus = 'rate_limited';
                 return [];
               }
               throw new Error(`HTTP ${res.status}`);
@@ -214,6 +229,8 @@ export class SponsorBlockBase {
 
             if (!Array.isArray(data)) {
               this.setCache(videoId, []);
+              this.lastFetchStatus = 'network_error';
+              this.lastFetchError = 'Respuesta de API no válida';
               return [];
             }
 
@@ -239,6 +256,7 @@ export class SponsorBlockBase {
             this.consecutiveFailures = 0;
             this.circuitCooldownUntil = 0;
             this.fallbackUsed = (baseUrl !== this.options.apiUrl);
+            this.lastFetchStatus = segments.length ? 'segments_found' : 'no_segments';
             if (this.fallbackUsed) {
               this.fallbackUsedCount = (this.fallbackUsedCount || 0) + 1;
               console.info(`[SponsorBlock] Fallback mirror succeeded for ${videoId} using ${baseUrl}`);
@@ -251,6 +269,8 @@ export class SponsorBlockBase {
               continue;
             }
             this.consecutiveFailures++;
+            this.lastFetchStatus = 'network_error';
+            this.lastFetchError = String(err?.message || err).slice(0, 140);
             if (this.consecutiveFailures >= this.options.circuitBreakerThreshold) {
               this.circuitCooldownUntil = Date.now() + this.options.circuitCooldownMs;
             }
@@ -394,6 +414,9 @@ export class SponsorBlockBase {
       autoSkip: this.options.autoSkip,
       categories: [...this.options.categories],
       currentVideoId: this.currentVideoId,
+      lastFetchStatus: this.lastFetchStatus,
+      lastFetchTime: this.lastFetchTime,
+      lastFetchError: this.lastFetchError,
       segmentCount: this.currentSegments.length,
       cachedVideosCount: this.cache.size,
       skipCount: this.skipCount,
