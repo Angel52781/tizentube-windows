@@ -1,4 +1,28 @@
-# TizenTube Windows — prueba personal (v0.1.0-preview.13)
+# TizenTube Windows — prueba personal (v0.1.0-preview.16)
+
+## Canal único para nuevas versiones
+
+La única rama de desarrollo permanente es main. Las actualizaciones de la aplicación vienen de GitHub Releases publicadas desde main, no de artefactos temporales de GitHub Actions. Al iniciar TizenTube se comprueban las nuevas Releases y se pide confirmación antes de sustituir la aplicación. También se puede pulsar Actualizar.
+
+La descarga se verifica mediante SHA256SUMS.txt, la instalación antigua se conserva como respaldo y el perfil de YouTube se mantiene fuera de la carpeta del programa.
+
+**Transición excepcional:** preview.15 tenía un fallo en su proceso auxiliar de actualización, que copiaba el ejecutable sin sus dependencias .NET. Por tanto, quienes todavía usen preview.15 deben instalar preview.16 manualmente una última vez. Preview.16 integra sus dependencias al ejecutar el actualizador y valida su arranque por separado en Windows. La sustitución entre dos versiones reales seguirá pendiente de una prueba integral.
+
+## Preview.15 — corrección de regresiones reportadas
+
+- Retira el estilo nativo WS_THICKFRAME y la intervención en WM_NCCALCSIZE que podían producir una barra nativa clara y duplicada sobre el encabezado oscuro. Conserva las áreas de redimensionamiento implementadas mediante hit tests personalizados.
+- La prueba CI inspecciona un píxel del **marco visible de la ventana en pantalla**, además del componente interno y la extensión real del cliente al maximizar; no basta con que el código de la barra dibuje colores correctos.
+- SponsorBlock sincroniza la identidad del vídeo cada 1,5 segundos para cambios de URL de YouTube que no emiten eventos SPA habituales. También comprueba el tiempo de reproducción como respaldo si el listener de eventos está conectado a un elemento antiguo; evita repetir saltos mediante UUID.
+- El botón **Protecciones** distingue activación, vídeo detectado, reproductor conectado, segmentos recibidos, fallos/límites de consulta y saltos realizados. **«Activo» no equivale a «segmentos detectados».**
+- Para una prueba controlada de SponsorBlock, un vídeo con segmentos conocidos es https://www.youtube.com/watch?v=ifI_fwg55k8. La API devolvió segmentos de introducción [0,2.811777] y [24.182026,39.86125] en la comprobación del 25 de octubre de 2026; esos datos comunitarios pueden cambiar.
+- Todavía falta comprobar visualmente las dos correcciones en una sesión física del usuario. No se autoriza release oficial solo por CI verde.
+
+## Cambios de preview.14 (rama de pruebas, todavía sin release)
+
+- **Actualizaciones**: botón nativo `Actualizar` en la parte superior; búsqueda automática silenciosa al iniciar. Solo consulta versiones publicadas en `Angel52781/tizentube-windows`. Solicita permiso antes de descargar, verifica `SHA256SUMS.txt` y el SHA-256 real, y puede reemplazar la carpeta portable `TizenTube-Windows-x64` tras cerrar la app. El ejecutable se actualiza desde una copia temporal independiente, conservando una carpeta de respaldo para revertir. Las preferencias y el perfil permanecen en `%LOCALAPPDATA%\TizenTube`. Un EXE suelto fuera de la carpeta portable abre la descarga oficial, sin sobrescribir otras carpetas.
+- **Protecciones**: botón nativo `Protecciones` muestra el estado real de SponsorBlock, salto automático, cantidad de segmentos del vídeo y AdBlock. Permite abrir la configuración. Si la UI personalizada de YouTube no se monta, el cargador intenta igualmente consultar SponsorBlock y saltar segmentos.
+- **Bordes de pantalla**: corrección de `WM_NCCALCSIZE` al maximizar o entrar en fullscreen para eliminar el borde invisible de `WS_THICKFRAME`. La validación de Windows mide que el rectángulo cliente maximizado coincida con el área de trabajo. La apariencia real en el equipo del usuario queda por verificar.
+- **Limitaciones**: no se garantiza que todos los anuncios ni todos los segmentos comunitarios sean bloqueados; la API SponsorBlock y la estructura de YouTube pueden cambiar. El autoactualizador todavía necesita prueba de instalación/reemplazo en Windows antes de afirmar que funciona completamente. Este build **no** aparece en la búsqueda de actualizaciones hasta que exista una release oficial más reciente.
 
 Este es un **prototipo de escritorio no oficial**, todavía en pruebas. Abre YouTube mediante Microsoft Edge WebView2 en una ventana propia; **no reproduce exactamente la interfaz de la aplicación Android/Chromecast**. La integración real de bloqueo de anuncios, SponsorBlock y DeArrow puede presentar fallos por cambios de YouTube. No se garantiza su funcionamiento en todos los vídeos.
 

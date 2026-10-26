@@ -1,6 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="TizenTube Windows icon">
-  <rect x="4" y="4" width="248" height="248" rx="57" fill="#111827"/>
-  <rect x="37" y="67" width="182" height="122" rx="36" fill="#e83c59"/>
-  <path d="M107 96v65l58-32.5z" fill="#ffffff"/>
-  <path d="M68 203h120" fill="none" stroke="#37d4c5" stroke-width="10" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="TizenTube player window icon">
+  <rect x="6" y="6" width="244" height="244" rx="54" fill="#111928"/>
+  <rect x="61" y="69" width="134" height="118" rx="29" fill="none" stroke="#23cbd4" stroke-width="15"/>
+  <path d="M108 97 L164 128 L108 159 Z" fill="#f8fbff"/>
 </svg>

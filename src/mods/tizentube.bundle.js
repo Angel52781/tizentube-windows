@@ -544,118 +544,111 @@ class PlaybackEngine {
     if (this._onKeyDown) return;
 
     this._onKeyDown = (e) => {
-      // Avoid intercepting keystrokes inside search input or comments
-      const tag = e.target.tagName ? e.target.tagName.toLowerCase() : '';
-      if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) {
+      // Do not steal browser/system combinations, text entry, or the focused
+      // buttons and sliders. Keyboard controls belong to video playback only.
+      const target = e.target;
+      const tag = target?.tagName?.toLowerCase?.() || '';
+      if (e.isComposing || e.ctrlKey || e.altKey || e.metaKey ||
+          target?.isContentEditable ||
+          ['input', 'textarea', 'select', 'button', 'a'].includes(tag) ||
+          target?.closest?.('[contenteditable], [role="textbox"], [role="button"], [role="slider"], [role="menuitem"]')) {
         return;
       }
 
-      // Percent jumps (0-9)
-      if (e.key >= '0' && e.key <= '9') {
+      // YouTube also handles these keys. Capture *before* its document/player
+      // handlers; preventDefault alone at window bubble phase is too late
+      // and causes a 5s seek followed by another 5s seek (visible as 10s).
+      const claim = () => {
         e.preventDefault();
-        const percent = parseInt(e.key, 10) * 10;
+        e.stopImmediatePropagation?.();
+      };
+      const key = e.code === 'Space' ? ' ' : e.key;
+
+      // Native YouTube owns C (captions), T (theater) and I (miniplayer).
+      // ViewingExperience observes the *trusted* T key to persist theater
+      // choice. Consuming these at window capture would break that contract.
+      if (typeof key === 'string' && ['c', 't', 'i'].includes(key.toLowerCase())) return;
+
+      // Percent jumps (0-9)
+      if (key >= '0' && key <= '9') {
+        claim();
+        const percent = parseInt(key, 10) * 10;
         const target = (this.state.duration || 0) * (percent / 100);
         this.seekTo(target);
         return;
       }
 
-      switch (e.key) {
+      switch (key) {
         case ' ':
+        case 'Spacebar':
         case 'k':
         case 'K':
-          e.preventDefault();
-          this.togglePlay();
+          claim();
+          if (!e.repeat) this.togglePlay();
           break;
         case 'j':
         case 'J':
-          e.preventDefault();
+          claim();
           this.seekBy(-10);
           break;
         case 'l':
         case 'L':
-          e.preventDefault();
+          claim();
           this.seekBy(10);
           break;
         case 'ArrowLeft':
-          e.preventDefault();
+          claim();
           this.seekBy(-5);
           break;
         case 'ArrowRight':
-          e.preventDefault();
+          claim();
           this.seekBy(5);
           break;
         case 'Home':
-          e.preventDefault();
+          claim();
           this.seekTo(0);
           break;
         case 'End':
-          e.preventDefault();
+          claim();
           this.seekTo(this.state.duration || 0);
           break;
         case 'ArrowUp':
-          e.preventDefault();
+          claim();
           this.adjustVolume(5);
           break;
         case 'ArrowDown':
-          e.preventDefault();
+          claim();
           this.adjustVolume(-5);
           break;
         case 'm':
         case 'M':
-          e.preventDefault();
+          claim();
           this.toggleMute();
           break;
         case 'f':
         case 'F':
         case 'F11':
-          e.preventDefault();
+          claim();
           this.toggleFullscreen();
           break;
         case '>':
         case '.':
           if (e.shiftKey || e.key === '>') {
-            e.preventDefault();
+            claim();
             this.setPlaybackRate(this.state.playbackRate + 0.25);
           }
           break;
         case '<':
         case ',':
           if (e.shiftKey || e.key === '<') {
-            e.preventDefault();
+            claim();
             this.setPlaybackRate(this.state.playbackRate - 0.25);
           }
-          break;
-        case 'c':
-        case 'C':
-          e.preventDefault();
-          if (typeof document !== 'undefined') {
-            const ccBtn = document.querySelector('.ytp-subtitles-button');
-            if (ccBtn) ccBtn.click();
-          }
-          this.emit('toggleCaptions');
-          break;
-        case 't':
-        case 'T':
-          e.preventDefault();
-          if (typeof document !== 'undefined') {
-            const theaterBtn = document.querySelector('.ytp-size-button');
-            if (theaterBtn) theaterBtn.click();
-          }
-          this.emit('toggleTheater');
-          break;
-        case 'i':
-        case 'I':
-          e.preventDefault();
-          if (typeof document !== 'undefined') {
-            const miniBtn = document.querySelector('.ytp-miniplayer-button');
-            if (miniBtn) miniBtn.click();
-          }
-          this.emit('toggleMiniplayer');
           break;
       }
     };
 
-    window.addEventListener('keydown', this._onKeyDown);
+    window.addEventListener('keydown', this._onKeyDown, true);
   }
 
   /**
@@ -742,7 +735,7 @@ class PlaybackEngine {
       this.videoObserver = null;
     }
     if (typeof window !== 'undefined' && this._onKeyDown) {
-      window.removeEventListener('keydown', this._onKeyDown);
+      window.removeEventListener('keydown', this._onKeyDown, true);
       this._onKeyDown = null;
     }
     if (typeof document !== 'undefined' && this._onFsChange) {
@@ -764,6 +757,8 @@ class PlaybackEngine {
 class ViewingExperience {
   constructor(playback, options = {}) {
     this.playback = playback;
+    // User-selected continuity: re-open the last unfinished video at its
+    // last saved timestamp. The session guard prevents redirects on Home.
     this.options = { restoreOnLaunch: true, ...options };
     this.theaterKey = 'tizentube.theater.v1';
     this.lastKey = 'tizentube.lastVideo.v1';
@@ -853,7 +848,7 @@ class ViewingExperience {
   persistProgress(force = false) {
     if (!this.playback?.videoElement) return;
     const now = Date.now();
-    if (!force && now - this.lastSavedAt < 8000) return;
+    if (!force && now - this.lastSavedAt < 2000) return;
     const id = this.getVideoId();
     const video = this.playback.videoElement;
     // Never store ad positions, livestreams, short previews, or invalid data.
@@ -869,6 +864,15 @@ class ViewingExperience {
         duration: Math.floor(video.duration), updatedAt: now };
       this.getStorage()?.setItem(this.lastKey, JSON.stringify(state));
       this.lastSavedAt = now;
+      if (typeof window !== 'undefined' && window.chrome?.webview?.postMessage) {
+        window.chrome.webview.postMessage({
+          channel: 'viewing:last-video',
+          id: state.id,
+          position: state.position,
+          duration: state.duration,
+          updatedAt: state.updatedAt
+        });
+      }
     } catch (_) { /* Quota/privacy mode: fail without blocking playback */ }
   }
 
@@ -877,7 +881,12 @@ class ViewingExperience {
   clearCompletedVideo() {
     const old = this.readLastVideo();
     if (old && old.id === this.getVideoId()) {
-      try { this.getStorage()?.removeItem(this.lastKey); } catch (_) {}
+      try {
+        this.getStorage()?.removeItem(this.lastKey);
+        if (typeof window !== 'undefined' && window.chrome?.webview?.postMessage) {
+          window.chrome.webview.postMessage({ channel: 'viewing:clear-last-video' });
+        }
+      } catch (_) {}
     }
   }
 
@@ -961,8 +970,9 @@ class ViewingExperience {
       // trusted input protocol, after verifying that the state still differs.
       if (typeof window !== 'undefined' && window.chrome?.webview?.postMessage) {
         const now = Date.now();
+        const interval = this.nativeTheaterRestoreAttempts === 0 ? 0 : 2500;
         if (this.nativeTheaterRestoreAttempts < 5 &&
-            now - this.lastNativeTheaterRestoreAt > 3000) {
+            now - this.lastNativeTheaterRestoreAt >= interval) {
           this.lastNativeTheaterRestoreAt = now;
           this.nativeTheaterRestoreAttempts++;
           window.chrome.webview.postMessage({ channel: 'viewing:restore-theater', enabled: saved });
@@ -1229,6 +1239,9 @@ class SponsorBlockBase {
     // Circuit breaker state for external API outages
     this.consecutiveFailures = 0;
     this.circuitCooldownUntil = 0;
+    this.lastFetchStatus = 'no_video';
+    this.lastFetchTime = 0;
+    this.lastFetchError = null;
   }
 
   /**
@@ -1272,6 +1285,9 @@ class SponsorBlockBase {
     if (videoId === this.currentVideoId && this.currentSegments.length > 0) return;
 
     this.currentVideoId = videoId;
+    this.lastFetchStatus = 'loading';
+    this.lastFetchTime = Date.now();
+    this.lastFetchError = null;
     this.currentSegments = [];
     this.alreadySkippedSegments.clear();
 
@@ -1283,11 +1299,17 @@ class SponsorBlockBase {
       // to the next video. Never associate stale sponsor segments with it.
       if (videoId === this.currentVideoId && this.options.enabled) {
         this.currentSegments = segments;
+        if (!['network_error', 'rate_limited', 'unavailable'].includes(this.lastFetchStatus))
+          this.lastFetchStatus = segments.length ? 'segments_found' : 'no_segments';
       }
     } catch (err) {
       // SponsorBlock API downtime must never break video playback (fail-open)
       console.warn(`[SponsorBlock] Query failed for ${videoId} (fail-open):`, err.message);
-      if (videoId === this.currentVideoId) this.currentSegments = [];
+      if (videoId === this.currentVideoId) {
+        this.currentSegments = [];
+        this.lastFetchStatus = 'network_error';
+        this.lastFetchError = String(err?.message || err).slice(0, 140);
+      }
     }
   }
 
@@ -1313,6 +1335,7 @@ class SponsorBlockBase {
     // Circuit breaker: fail-open immediately if API is in cooldown after repeated outages
     const now = Date.now();
     if (this.circuitCooldownUntil > now) {
+      this.lastFetchStatus = 'unavailable';
       return [];
     }
 
@@ -1345,12 +1368,14 @@ class SponsorBlockBase {
                 // No segments exist for this video - cache empty array to avoid redundant queries
                 this.setCache(videoId, []);
                 this.consecutiveFailures = 0;
+                this.lastFetchStatus = 'no_segments';
                 return [];
               }
               if (res.status === 429) {
                 // Rate limit encountered: trip circuit breaker with longer backoff
                 this.consecutiveFailures = this.options.circuitBreakerThreshold;
                 this.circuitCooldownUntil = Date.now() + Math.max(60000, this.options.circuitCooldownMs * 2);
+                this.lastFetchStatus = 'rate_limited';
                 return [];
               }
               throw new Error(`HTTP ${res.status}`);
@@ -1365,6 +1390,8 @@ class SponsorBlockBase {
 
             if (!Array.isArray(data)) {
               this.setCache(videoId, []);
+              this.lastFetchStatus = 'network_error';
+              this.lastFetchError = 'Respuesta de API no válida';
               return [];
             }
 
@@ -1390,6 +1417,7 @@ class SponsorBlockBase {
             this.consecutiveFailures = 0;
             this.circuitCooldownUntil = 0;
             this.fallbackUsed = (baseUrl !== this.options.apiUrl);
+            this.lastFetchStatus = segments.length ? 'segments_found' : 'no_segments';
             if (this.fallbackUsed) {
               this.fallbackUsedCount = (this.fallbackUsedCount || 0) + 1;
               console.info(`[SponsorBlock] Fallback mirror succeeded for ${videoId} using ${baseUrl}`);
@@ -1402,6 +1430,8 @@ class SponsorBlockBase {
               continue;
             }
             this.consecutiveFailures++;
+            this.lastFetchStatus = 'network_error';
+            this.lastFetchError = String(err?.message || err).slice(0, 140);
             if (this.consecutiveFailures >= this.options.circuitBreakerThreshold) {
               this.circuitCooldownUntil = Date.now() + this.options.circuitCooldownMs;
             }
@@ -1545,6 +1575,9 @@ class SponsorBlockBase {
       autoSkip: this.options.autoSkip,
       categories: [...this.options.categories],
       currentVideoId: this.currentVideoId,
+      lastFetchStatus: this.lastFetchStatus,
+      lastFetchTime: this.lastFetchTime,
+      lastFetchError: this.lastFetchError,
       segmentCount: this.currentSegments.length,
       cachedVideosCount: this.cache.size,
       skipCount: this.skipCount,
@@ -2174,6 +2207,11 @@ class AdBlockBase {
     const isTvPayload = Boolean(obj.contents?.tvBrowseRenderer)
       || (typeof location !== 'undefined' && /^\/tv(?:\/|$)/.test(location.pathname || ''));
 
+    // Desktop player responses carry the streaming contract. Removing ad
+    // properties here can invalidate playback on accounts/regions not used
+    // by CI. Fail open on the player; feed cosmetics remain independently on.
+    if (!isTvPayload && (obj.streamingData || obj.playabilityStatus)) return;
+
     if (obj.adPlacements) {
       if (isTvPayload) obj.adPlacements = [];
       else delete obj.adPlacements;
@@ -2606,39 +2644,12 @@ class AdBlockBase {
         }
       }
 
-      // 2. If video player is marked as showing an ad (.ad-showing / .ad-interrupting), speed through it and mute
-      const player = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
-      const isAdShowing = Boolean(player && player.classList && (
-        player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting')
-      ));
-      const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+      // Deliberately never seek the HTML5 video to its duration or change
+      // its speed/mute state on the basis of a CSS ad-showing class.
+      // YouTube can leave that class behind while the real video loads;
+      // skipping to the end then destroys legitimate playback. Use only
+      // the native, visible skip-ad control (if YouTube provides one).
 
-      if (isAdShowing) {
-        if (video && !isNaN(video.duration) && video.duration > 0) {
-          try {
-            if (!this._wasAdPlaying) {
-              this._preAdRate = video.playbackRate || 1.0;
-              this._preAdMuted = video.muted || false;
-              this._wasAdPlaying = true;
-            }
-            video.muted = true;
-            video.playbackRate = 16.0;
-            video.currentTime = video.duration;
-            this.adVideoSpeedupCount++;
-          } catch (_) {}
-        }
-      } else if (this._wasAdPlaying) {
-        // Ad finished: cleanly restore user's preferred speed and mute state
-        this._wasAdPlaying = false;
-        if (video) {
-          try {
-            if (this._preAdRate !== null) video.playbackRate = this._preAdRate;
-            if (this._preAdMuted !== null) video.muted = this._preAdMuted;
-          } catch (_) {}
-        }
-        this._preAdRate = null;
-        this._preAdMuted = null;
-      }
     };
 
     this.skipObserver = new MutationObserver(() => {
@@ -4647,6 +4658,8 @@ class ModLoader {
     this._mountAttempts = 0;
     this._mountEventHandler = null;
     this._viewingMountReported = false;
+    this._fallbackVideoTimer = null;
+    this._fallbackVideoHandler = null;
   }
 
   /**
@@ -4709,6 +4722,54 @@ class ModLoader {
     }
     retryMount();
 
+    // SponsorBlock is a playback feature, not a custom-UI feature. If the
+    // injected settings/HUD cannot mount in a changed YouTube layout, still
+    // fetch segments for the active video and let the headless playback
+    // listener perform skips. AppUI remains the owner once it has mounted.
+    this._fallbackVideoHandler = () => {
+      if (typeof window === 'undefined') return;
+      // YouTube may use history.replaceState without firing a normal
+      // navigation or yt-navigate-finish event. Keep AppUI's video ID in sync
+      // rather than relying on a one-time listener.
+      if (this.ui?.isMounted) this.ui._checkUrl?.();
+      const id = String(window.location?.href || '')
+        .match(/[?&]v=([a-zA-Z0-9_-]{11})(?:[&#]|$)/)?.[1];
+      if (id && id !== this.sponsorblock.currentVideoId && !this.ui?.isMounted)
+        void this.sponsorblock.setVideo(id);
+
+      // WebView2/YouTube occasionally replaces the player while a prior
+      // timeupdate listener remains attached to an old video. Supplement
+      // event-driven skipping with a bounded 1.5s check of the real HTML5
+      // video. The SponsorBlock UUID set prevents duplicate skips.
+      if (!id || id !== this.sponsorblock.currentVideoId) return;
+      const video = this.playback?.videoElement
+        || (typeof document !== 'undefined'
+          ? document.querySelector?.('video.html5-main-video') : null);
+      if (!video || !Number.isFinite(video.currentTime) || video.readyState < 2)
+        return;
+      const target = this.sponsorblock.checkSkip(video.currentTime);
+      if (target === null) return;
+      if (this.ui?.isMounted && this.ui.handleSponsorBlockSkip) {
+        this.ui.handleSponsorBlockSkip(this.sponsorblock.lastSkipped || { targetTime: target });
+      } else {
+        if (this.playback?.videoElement === video) this.playback.seekTo(target);
+        else video.currentTime = target;
+        this.ipc.send('sponsorblock:skipped', {
+          videoId: id, targetTime: target,
+          category: this.sponsorblock.lastSkipped?.category
+        });
+      }
+    };
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('yt-navigate-finish', this._fallbackVideoHandler);
+      window.addEventListener('popstate', this._fallbackVideoHandler);
+    }
+    if (typeof setInterval === 'function') {
+      this._fallbackVideoTimer = setInterval(this._fallbackVideoHandler, 1500);
+      this._fallbackVideoTimer?.unref?.();
+    }
+    this._fallbackVideoHandler();
+
     // 4. Setup IPC commands from Native Host
     this.ipc.on('playback:command', (payload) => {
       if (!payload || !payload.action) return;
@@ -4756,6 +4817,11 @@ class ModLoader {
    * Cleans up all mod listeners, timers, caches, and injected DOM elements.
    */
   dispose() {
+    if (this._fallbackVideoTimer) clearInterval(this._fallbackVideoTimer);
+    if (this._fallbackVideoHandler && typeof window !== 'undefined') {
+      window.removeEventListener?.('yt-navigate-finish', this._fallbackVideoHandler);
+      window.removeEventListener?.('popstate', this._fallbackVideoHandler);
+    }
     if (this._mountRetryTimer) clearTimeout(this._mountRetryTimer);
     if (this._mountEventHandler && typeof window !== 'undefined') {
       window.removeEventListener?.('DOMContentLoaded', this._mountEventHandler);

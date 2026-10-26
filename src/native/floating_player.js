@@ -37,6 +37,20 @@ html.tt-floating-mode body > #movie_player.tt-floating-player video.html5-main-v
 }
 html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-chrome-bottom {
   bottom: 0 !important;
+  transition: opacity 0.2s ease-in-out !important;
+  transform: scale(0.88) !important;
+  transform-origin: bottom center !important;
+}
+html.tt-floating-mode body > #movie_player.tt-floating-player:not(:hover) .ytp-chrome-bottom,
+html.tt-floating-mode body > #movie_player.tt-floating-player:not(:hover) .ytp-gradient-bottom,
+html.tt-floating-mode body > #movie_player.tt-floating-player:not(:hover) .ytp-gradient-top {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-ce-element,
+html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-cards-teaser,
+html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-paid-content-overlay {
+  display: none !important;
 }
 `;
   const relocate = (parent, node, reference) => {
@@ -44,6 +58,11 @@ html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-chrome-bottom
     // ordinary appendChild is a fallback, never a second instance of video.
     if (typeof parent.moveBefore === 'function') parent.moveBefore(node, reference);
     else parent.insertBefore(node, reference);
+  };
+  const getWatchFallbackContainer = () => {
+    return document.querySelector(
+      '#player-theater-container, #player-container-outer, #player-container, ytd-watch-flexy #player, #movie_player_parent'
+    );
   };
   const diagnostics = () => {
     const video = document.querySelector('video.html5-main-video');
@@ -69,7 +88,7 @@ html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-chrome-bottom
         width: Math.round(rect.width), height: Math.round(rect.height) } : null,
       viewport: { width: window.innerWidth, height: window.innerHeight },
       playerInBody: document.querySelector('#movie_player')?.parentElement === document.body,
-      theater: theater ? theater.hasAttribute('theater') : null,
+      theater: typeof theater?.hasAttribute === 'function' ? theater.hasAttribute('theater') : null,
       fullscreen: !!document.fullscreenElement,
       youtubeFullscreen: !!document.querySelector('.ytp-fullscreen'),
       theaterPreference: typeof window.__TT_THEATER_PREF === 'boolean'
@@ -87,6 +106,7 @@ html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-chrome-bottom
   const start = () => {
     if (state) return true;
     if (location.pathname !== '/watch') return false;
+    if (document.fullscreenElement) return false;
     const player = document.getElementById('movie_player');
     const video = player?.querySelector('video.html5-main-video');
     if (!player || !video || !video.isConnected || video.readyState < 2 ||
@@ -104,7 +124,8 @@ html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-chrome-bottom
     const initialTime = video.currentTime;
     const initialVideo = video;
     try {
-      document.head.appendChild(css);
+      if (document.head) document.head.appendChild(css);
+      else document.documentElement?.appendChild(css);
       document.body.appendChild(backdrop);
       // If a browser lacks moveBefore, a legacy DOM move may restart video.
       // Restore its playing state below if this happens; never hide failure.
@@ -127,22 +148,53 @@ html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-chrome-bottom
     }
   };
   const stop = () => {
-    if (!state) return true;
-    const { parent, reference, player, previousStyle, css, backdrop } = state;
+    const savedState = state;
     state = null;
     document.documentElement.classList.remove('tt-floating-mode');
-    player.classList.remove('tt-floating-player');
-    // Return the SAME YouTube player to its original position in the watch
-    // page. YouTube's subscriptions, SponsorBlock and stream are unaffected.
-    if (parent.isConnected) relocate(parent, player,
-      reference?.parentNode === parent ? reference : null);
-    if (previousStyle === null) player.removeAttribute('style');
-    else player.setAttribute('style', previousStyle);
-    backdrop?.remove();
-    css?.remove();
+    document.getElementById('tt-floating-backdrop')?.remove();
+    document.getElementById('tt-floating-player-styles')?.remove();
     document.getElementById('tizentube-native-pip')?.setAttribute('aria-pressed', 'false');
+
+    const player = savedState?.player || document.getElementById('movie_player');
+    if (player) {
+      player.classList.remove('tt-floating-player');
+      if (savedState) {
+        if (savedState.previousStyle === null) player.removeAttribute('style');
+        else player.setAttribute('style', savedState.previousStyle);
+      }
+      // Return the SAME YouTube player to its original position in the watch
+      // page. If parent was detached, fall back to known watch container.
+      if (player.parentElement === document.body) {
+        let target = savedState?.parent;
+        if (!target || !target.isConnected) target = getWatchFallbackContainer();
+        if (target && target.isConnected) {
+          const ref = (savedState?.reference && savedState.reference.parentNode === target)
+            ? savedState.reference : null;
+          relocate(target, player, ref);
+        }
+      }
+    }
+    savedState?.backdrop?.remove();
+    savedState?.css?.remove();
+    // Dispatch window resize so YouTube player recalculates internal dimensions
+    // rather than staying clipped/miniaturized in the corner.
+    try { window.dispatchEvent(new Event('resize')); } catch (_) {}
     return true;
   };
-  window.__ttFloating = { start, stop, diagnostics };
+  const recover = () => {
+    const player = document.getElementById('movie_player');
+    const inBody = player?.parentElement === document.body;
+    const isFloating = document.documentElement.classList.contains('tt-floating-mode');
+    if (inBody && (!isFloating || !state)) {
+      stop();
+    }
+    const video = document.querySelector('video.html5-main-video');
+    if (video && video.paused && !video.ended && typeof video.play === 'function') {
+      try { video.play().catch(() => {}); } catch (_) {}
+    }
+    try { window.dispatchEvent(new Event('resize')); } catch (_) {}
+    return diagnostics();
+  };
+  window.__ttFloating = { start, stop, recover, diagnostics };
   window.addEventListener('pagehide', stop, { once: true });
 })();

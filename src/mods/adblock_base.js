@@ -187,6 +187,11 @@ export class AdBlockBase {
     const isTvPayload = Boolean(obj.contents?.tvBrowseRenderer)
       || (typeof location !== 'undefined' && /^\/tv(?:\/|$)/.test(location.pathname || ''));
 
+    // Desktop player responses carry the streaming contract. Removing ad
+    // properties here can invalidate playback on accounts/regions not used
+    // by CI. Fail open on the player; feed cosmetics remain independently on.
+    if (!isTvPayload && (obj.streamingData || obj.playabilityStatus)) return;
+
     if (obj.adPlacements) {
       if (isTvPayload) obj.adPlacements = [];
       else delete obj.adPlacements;
@@ -619,39 +624,12 @@ export class AdBlockBase {
         }
       }
 
-      // 2. If video player is marked as showing an ad (.ad-showing / .ad-interrupting), speed through it and mute
-      const player = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
-      const isAdShowing = Boolean(player && player.classList && (
-        player.classList.contains('ad-showing') || player.classList.contains('ad-interrupting')
-      ));
-      const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+      // Deliberately never seek the HTML5 video to its duration or change
+      // its speed/mute state on the basis of a CSS ad-showing class.
+      // YouTube can leave that class behind while the real video loads;
+      // skipping to the end then destroys legitimate playback. Use only
+      // the native, visible skip-ad control (if YouTube provides one).
 
-      if (isAdShowing) {
-        if (video && !isNaN(video.duration) && video.duration > 0) {
-          try {
-            if (!this._wasAdPlaying) {
-              this._preAdRate = video.playbackRate || 1.0;
-              this._preAdMuted = video.muted || false;
-              this._wasAdPlaying = true;
-            }
-            video.muted = true;
-            video.playbackRate = 16.0;
-            video.currentTime = video.duration;
-            this.adVideoSpeedupCount++;
-          } catch (_) {}
-        }
-      } else if (this._wasAdPlaying) {
-        // Ad finished: cleanly restore user's preferred speed and mute state
-        this._wasAdPlaying = false;
-        if (video) {
-          try {
-            if (this._preAdRate !== null) video.playbackRate = this._preAdRate;
-            if (this._preAdMuted !== null) video.muted = this._preAdMuted;
-          } catch (_) {}
-        }
-        this._preAdRate = null;
-        this._preAdMuted = null;
-      }
     };
 
     this.skipObserver = new MutationObserver(() => {

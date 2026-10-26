@@ -22,21 +22,41 @@
     button.id = buttonId;
     button.type = 'button';
     button.className = 'tt-masthead-back';
+    // Inline fallbacks matter: YouTube rewrites masthead CSS and in preview.13
+    // a user saw the browser's giant white default <button> instead.
+    // Match the 40px dark, circular native toolbar controls without a tile.
+    button.setAttribute('style',
+      'appearance:none!important;-webkit-appearance:none!important;' +
+      'box-sizing:border-box!important;display:inline-flex!important;' +
+      'align-items:center!important;justify-content:center!important;' +
+      'flex:0 0 40px!important;width:40px!important;height:40px!important;' +
+      'margin:0 4px 0 0!important;padding:0!important;' +
+      'border:0!important;outline-offset:2px!important;' +
+      'border-radius:50%!important;box-shadow:none!important;' +
+      'background:transparent!important;color:#f1f1f1!important;' +
+      'cursor:pointer!important;vertical-align:middle!important;');
     button.title = 'Retroceder a la página anterior (Alt + Izquierda)';
     button.setAttribute('aria-label', 'Retroceder');
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('width', '24');
-    svg.setAttribute('height', '24');
+    svg.setAttribute('width', '20');
+    svg.setAttribute('height', '20');
     svg.setAttribute('fill', 'none');
     svg.setAttribute('stroke', 'currentColor');
-    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-width', '1.9');
     svg.setAttribute('stroke-linecap', 'round');
     svg.setAttribute('stroke-linejoin', 'round');
     const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    arrow.setAttribute('d', 'M15 18l-6-6 6-6M9 12h11');
+    arrow.setAttribute('d', 'M19 12H5m7 7-7-7 7-7');
     svg.appendChild(arrow);
+    svg.setAttribute('aria-hidden', 'true');
     button.appendChild(svg);
+    button.addEventListener('mouseenter', () => {
+      button.style?.setProperty?.('background-color', '#272727', 'important');
+    });
+    button.addEventListener('mouseleave', () => {
+      button.style?.setProperty?.('background-color', 'transparent', 'important');
+    });
     button.addEventListener('click', event => {
       event.preventDefault();
       event.stopPropagation();

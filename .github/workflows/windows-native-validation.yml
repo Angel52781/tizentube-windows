@@ -42,6 +42,9 @@ jobs:
         shell: pwsh
         run: |
           npm test
+          node scripts/test_native_updater.js
+          node scripts/test_sponsorblock_real_skip_path.js
+          node scripts/test_playback_failopen.js
           node scripts/test_keyboard_shortcuts.js
 
       - name: Generate Windows application icon
@@ -49,6 +52,7 @@ jobs:
         run: |
           python scripts/build_icon.py
           if (!(Test-Path assets/TizenTube.ico)) { throw 'APP_ICON_MISSING' }
+          python scripts/test_windows_icon.py
 
       - name: Verify PE32+ reproducible builder and bit-exact determinism
         shell: pwsh
@@ -84,6 +88,20 @@ jobs:
           "DOTNET_VERSION=8.0" | Out-File -FilePath windows-out/build-evidence.txt -Append
           "TIMESTAMP=$([DateTime]::UtcNow.ToString('o'))" | Out-File -FilePath windows-out/build-evidence.txt -Append
           Write-Host "[OK] Compiled native host: $hash ($($exe.Length) bytes)" -ForegroundColor Green
+
+      # A single dark titlebar must replace the Windows caption, not stack
+      # another row beneath it. Verify actual native window-state changes.
+      - name: Verify integrated window titlebar, maximize and minimize
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File scripts/ci_windows_titlebar.ps1 -Executable windows-out/TizenTubeHost.exe -EvidenceDirectory windows-out/telemetry/titlebar
+          if ($LASTEXITCODE -ne 0) { throw 'INTEGRATED_TITLEBAR_E2E_FAILED' }
+
+      - name: Verify last video and theater preferences survive native process restart
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File scripts/ci_windows_session_reopen.ps1 -Executable windows-out/TizenTubeHost.exe -EvidenceDirectory windows-out/telemetry/session
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_SESSION_REOPEN_FAILED' }
 
       - name: Execute Windows native host with process tree telemetry (multi-scenario)
         shell: pwsh
@@ -257,7 +275,12 @@ jobs:
           $exeSha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "TizenTubeHost.exe SHA256=$exeSha" | Set-Content (Join-Path $pkg 'CHECKSUMS.txt')
           "Commit=$env:GITHUB_SHA" | Add-Content (Join-Path $pkg 'CHECKSUMS.txt')
-          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.13.zip'
+          # Check that the full packaged .NET app can run after the updater
+          # copies it outside the original install path; EXE-only broke prior
+          # versions. This is a real process launch, not a static assertion.
+          & (Join-Path $pkg 'TizenTubeHost.exe') --verify-detached-updater-host $pkg
+          if ($LASTEXITCODE -ne 0) { throw 'PORTABLE_UPDATER_DETACHED_HOST_CANNOT_START' }
+          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.16.zip'
           Compress-Archive -Path $pkg -DestinationPath $zip -CompressionLevel Optimal -Force
           if (!(Test-Path $zip)) { throw 'PORTABLE_ZIP_MISSING' }
           $zipSha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -271,7 +294,7 @@ jobs:
         with:
           name: tizentube-windows-x64-portable-preview
           path: |
-            release-out/TizenTube-Windows-x64-v0.1.0-preview.13.zip
+            release-out/TizenTube-Windows-x64-v0.1.0-preview.16.zip
             release-out/SHA256SUMS.txt
             release-out/portable-smoke-evidence.json
             release-out/standalone-exe-smoke-evidence.json

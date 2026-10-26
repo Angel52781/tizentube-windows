@@ -43,6 +43,7 @@ jobs:
         run: |
           node scripts/bundle_mods.js
           node scripts/test_runtime.js
+          node scripts/test_playback_failopen.js
           node scripts/test_ui_features.js
           node scripts/test_keyboard_shortcuts.js
           node scripts/test_hidpi_comments_ux.js
@@ -63,10 +64,26 @@ jobs:
         shell: pwsh
         run: |
           python scripts/build_icon.py
+          python scripts/test_windows_icon.py
           dotnet publish src/native/TizenTubeWindows.csproj -c Release -f net8.0-windows -r win-x64 --self-contained false -o windows-experience-host
           if ($LASTEXITCODE -ne 0 -or !(Test-Path windows-experience-host/TizenTubeHost.exe)) {
             throw 'WINDOWS_EXE_BUILD_FAILED'
           }
+      - name: Verify native Back toolbar and screenshot before playback journey
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File ./scripts/ci_windows_toolbar.ps1 -Executable windows-experience-host/TizenTubeHost.exe -EvidenceDirectory windows-toolbar-evidence
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_NATIVE_TOOLBAR_FAILED' }
+      - name: Verify offline native WebView2 media during floating/fullscreen lifecycle
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File ./scripts/ci_windows_floating_cycle.ps1 -Executable windows-experience-host/TizenTubeHost.exe -EvidenceDirectory windows-experience-evidence/offline-cycle -OfflineFixture
+          if ($LASTEXITCODE -ne 0) { throw 'OFFLINE_WEBVIEW2_FLOATING_CYCLE_FAILED' }
+      - name: Prove real home feed and two independently playable selected videos
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File ./scripts/ci_windows_navigation_playback.ps1 -Executable windows-experience-host/TizenTubeHost.exe -EvidenceDirectory windows-experience-evidence
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_REAL_MULTI_VIDEO_JOURNEY_FAILED' }
       - name: Press real Windows Arrow keys and Space inside WebView2
         shell: pwsh
         run: |
@@ -80,6 +97,11 @@ jobs:
           # sees the actual script exit status instead of a stale value.
           & pwsh -NoProfile -File ./scripts/ci_windows_experience.ps1 -Executable windows-experience-host/TizenTubeHost.exe -EvidenceDirectory windows-experience-evidence
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_REAL_VIDEO_E2E_FAILED' }
+      - name: Validate P0 Normal -> Cinema -> Floating -> Fullscreen -> Return cycle
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File ./scripts/ci_windows_floating_cycle.ps1 -Executable windows-experience-host/TizenTubeHost.exe -EvidenceDirectory windows-experience-evidence/cycle
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_FLOATING_CYCLE_FAILED' }
       - name: Validate process-tree CPU and private RAM performance telemetry
         shell: pwsh
         run: |
@@ -91,6 +113,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-youtube-experience-e2e
-          path: windows-experience-evidence/**
+          path: |
+            windows-experience-evidence/**
+            windows-toolbar-evidence/**
           if-no-files-found: warn
           retention-days: 14

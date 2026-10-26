@@ -1,0 +1,55 @@
+name: Windows Offline Floating Media E2E
+
+# Independent Windows evidence: does NOT depend on YouTube's guest playback
+# policy or datacenter IP restrictions. It is not a substitute for YouTube E2E.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - '.github/workflows/windows-offline-floating-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-webview2-offline-media:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build native application with embedded floating player
+        shell: pwsh
+        run: |
+          python scripts/build_icon.py
+          if ($LASTEXITCODE -ne 0) { throw 'OFFLINE_ICON_BUILD_FAILED' }
+          node scripts/bundle_mods.js
+          if ($LASTEXITCODE -ne 0) { throw 'OFFLINE_BUNDLE_FAILED' }
+          dotnet publish src/native/TizenTubeWindows.csproj -c Release -f net8.0-windows -r win-x64 --self-contained false -o offline-host
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path offline-host/TizenTubeHost.exe)) { throw 'OFFLINE_HOST_BUILD_FAILED' }
+      - name: Assert real WebView2 frames and native floating transitions
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File ./scripts/ci_windows_floating_cycle.ps1 -Executable offline-host/TizenTubeHost.exe -EvidenceDirectory offline-media-evidence -OfflineFixture
+          if ($LASTEXITCODE -ne 0) { throw 'OFFLINE_NATIVE_MEDIA_E2E_FAILED' }
+          $result = Get-Content offline-media-evidence/results.json -Raw | ConvertFrom-Json
+          if ($result.status -ne 'PASS_LOCAL_MEDIA_FIXTURE' -or !$result.videoLoaded) { throw 'OFFLINE_VIDEO_NOT_VERIFIED' }
+      - name: Preserve physical Windows capture and transition evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-offline-floating-evidence
+          path: offline-media-evidence/**
+          if-no-files-found: warn
+          retention-days: 14

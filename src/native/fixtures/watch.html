@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Offline WebView2 playback lifecycle fixture</title>
+  <style>
+    html, body { margin: 0; background: #101010; color: white; }
+    #player { position: relative; height: calc(100vh - 52px); }
+    #movie_player { width: 100%; height: 100%; background: black; }
+    video.html5-main-video { width: 100%; height: 100%; object-fit: contain; }
+    .controls { height: 52px; display: flex; align-items: center; gap: 12px; }
+    button { font-size: 16px; padding: 8px; }
+  </style>
+</head>
+<body>
+  <ytd-watch-flexy>
+    <div id="player">
+      <div id="movie_player">
+        <video class="html5-main-video" autoplay muted playsinline></video>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="ytp-size-button" type="button">Theater</button>
+      <button class="ytp-fullscreen-button" type="button">Fullscreen</button>
+      <button id="tizentube-native-pip" type="button" aria-pressed="false">Float</button>
+    </div>
+  </ytd-watch-flexy>
+  <script>
+    // Keep the same /watch path checked by the production floating controller.
+    history.replaceState(null, '', '/watch');
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 360;
+    const ctx = canvas.getContext('2d');
+    let frame = 0;
+    function paint() {
+      frame += 1;
+      ctx.fillStyle = frame % 2 ? '#163950' : '#285720';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#fff';
+      ctx.font = '36px sans-serif';
+      ctx.fillText('WEBVIEW2 FRAMES ' + frame, 30, 90);
+      requestAnimationFrame(paint);
+    }
+    paint();
+    const video = document.querySelector('video.html5-main-video');
+    video.srcObject = canvas.captureStream(15);
+    video.play().catch(error => {
+      document.documentElement.dataset.mediaError = String(error);
+    });
+    document.querySelector('.ytp-size-button').addEventListener('click', () => {
+      const watch = document.querySelector('ytd-watch-flexy');
+      watch.toggleAttribute('theater');
+    });
+  </script>
+</body>
+</html>

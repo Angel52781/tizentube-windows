@@ -42,6 +42,8 @@ export class ModLoader {
     this._mountAttempts = 0;
     this._mountEventHandler = null;
     this._viewingMountReported = false;
+    this._fallbackVideoTimer = null;
+    this._fallbackVideoHandler = null;
   }
 
   /**
@@ -104,6 +106,54 @@ export class ModLoader {
     }
     retryMount();
 
+    // SponsorBlock is a playback feature, not a custom-UI feature. If the
+    // injected settings/HUD cannot mount in a changed YouTube layout, still
+    // fetch segments for the active video and let the headless playback
+    // listener perform skips. AppUI remains the owner once it has mounted.
+    this._fallbackVideoHandler = () => {
+      if (typeof window === 'undefined') return;
+      // YouTube may use history.replaceState without firing a normal
+      // navigation or yt-navigate-finish event. Keep AppUI's video ID in sync
+      // rather than relying on a one-time listener.
+      if (this.ui?.isMounted) this.ui._checkUrl?.();
+      const id = String(window.location?.href || '')
+        .match(/[?&]v=([a-zA-Z0-9_-]{11})(?:[&#]|$)/)?.[1];
+      if (id && id !== this.sponsorblock.currentVideoId && !this.ui?.isMounted)
+        void this.sponsorblock.setVideo(id);
+
+      // WebView2/YouTube occasionally replaces the player while a prior
+      // timeupdate listener remains attached to an old video. Supplement
+      // event-driven skipping with a bounded 1.5s check of the real HTML5
+      // video. The SponsorBlock UUID set prevents duplicate skips.
+      if (!id || id !== this.sponsorblock.currentVideoId) return;
+      const video = this.playback?.videoElement
+        || (typeof document !== 'undefined'
+          ? document.querySelector?.('video.html5-main-video') : null);
+      if (!video || !Number.isFinite(video.currentTime) || video.readyState < 2)
+        return;
+      const target = this.sponsorblock.checkSkip(video.currentTime);
+      if (target === null) return;
+      if (this.ui?.isMounted && this.ui.handleSponsorBlockSkip) {
+        this.ui.handleSponsorBlockSkip(this.sponsorblock.lastSkipped || { targetTime: target });
+      } else {
+        if (this.playback?.videoElement === video) this.playback.seekTo(target);
+        else video.currentTime = target;
+        this.ipc.send('sponsorblock:skipped', {
+          videoId: id, targetTime: target,
+          category: this.sponsorblock.lastSkipped?.category
+        });
+      }
+    };
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('yt-navigate-finish', this._fallbackVideoHandler);
+      window.addEventListener('popstate', this._fallbackVideoHandler);
+    }
+    if (typeof setInterval === 'function') {
+      this._fallbackVideoTimer = setInterval(this._fallbackVideoHandler, 1500);
+      this._fallbackVideoTimer?.unref?.();
+    }
+    this._fallbackVideoHandler();
+
     // 4. Setup IPC commands from Native Host
     this.ipc.on('playback:command', (payload) => {
       if (!payload || !payload.action) return;
@@ -151,6 +201,11 @@ export class ModLoader {
    * Cleans up all mod listeners, timers, caches, and injected DOM elements.
    */
   dispose() {
+    if (this._fallbackVideoTimer) clearInterval(this._fallbackVideoTimer);
+    if (this._fallbackVideoHandler && typeof window !== 'undefined') {
+      window.removeEventListener?.('yt-navigate-finish', this._fallbackVideoHandler);
+      window.removeEventListener?.('popstate', this._fallbackVideoHandler);
+    }
     if (this._mountRetryTimer) clearTimeout(this._mountRetryTimer);
     if (this._mountEventHandler && typeof window !== 'undefined') {
       window.removeEventListener?.('DOMContentLoaded', this._mountEventHandler);

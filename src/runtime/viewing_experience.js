@@ -5,6 +5,8 @@
 export class ViewingExperience {
   constructor(playback, options = {}) {
     this.playback = playback;
+    // User-selected continuity: re-open the last unfinished video at its
+    // last saved timestamp. The session guard prevents redirects on Home.
     this.options = { restoreOnLaunch: true, ...options };
     this.theaterKey = 'tizentube.theater.v1';
     this.lastKey = 'tizentube.lastVideo.v1';
@@ -94,7 +96,7 @@ export class ViewingExperience {
   persistProgress(force = false) {
     if (!this.playback?.videoElement) return;
     const now = Date.now();
-    if (!force && now - this.lastSavedAt < 8000) return;
+    if (!force && now - this.lastSavedAt < 2000) return;
     const id = this.getVideoId();
     const video = this.playback.videoElement;
     // Never store ad positions, livestreams, short previews, or invalid data.
@@ -110,6 +112,15 @@ export class ViewingExperience {
         duration: Math.floor(video.duration), updatedAt: now };
       this.getStorage()?.setItem(this.lastKey, JSON.stringify(state));
       this.lastSavedAt = now;
+      if (typeof window !== 'undefined' && window.chrome?.webview?.postMessage) {
+        window.chrome.webview.postMessage({
+          channel: 'viewing:last-video',
+          id: state.id,
+          position: state.position,
+          duration: state.duration,
+          updatedAt: state.updatedAt
+        });
+      }
     } catch (_) { /* Quota/privacy mode: fail without blocking playback */ }
   }
 
@@ -118,7 +129,12 @@ export class ViewingExperience {
   clearCompletedVideo() {
     const old = this.readLastVideo();
     if (old && old.id === this.getVideoId()) {
-      try { this.getStorage()?.removeItem(this.lastKey); } catch (_) {}
+      try {
+        this.getStorage()?.removeItem(this.lastKey);
+        if (typeof window !== 'undefined' && window.chrome?.webview?.postMessage) {
+          window.chrome.webview.postMessage({ channel: 'viewing:clear-last-video' });
+        }
+      } catch (_) {}
     }
   }
 
@@ -202,8 +218,9 @@ export class ViewingExperience {
       // trusted input protocol, after verifying that the state still differs.
       if (typeof window !== 'undefined' && window.chrome?.webview?.postMessage) {
         const now = Date.now();
+        const interval = this.nativeTheaterRestoreAttempts === 0 ? 0 : 2500;
         if (this.nativeTheaterRestoreAttempts < 5 &&
-            now - this.lastNativeTheaterRestoreAt > 3000) {
+            now - this.lastNativeTheaterRestoreAt >= interval) {
           this.lastNativeTheaterRestoreAt = now;
           this.nativeTheaterRestoreAttempts++;
           window.chrome.webview.postMessage({ channel: 'viewing:restore-theater', enabled: saved });

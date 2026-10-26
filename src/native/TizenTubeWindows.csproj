@@ -13,7 +13,7 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <Nullable>disable</Nullable>
     <Deterministic>true</Deterministic>
-    <Version>0.1.0</Version>
+    <Version>0.1.0-preview.16</Version>
     <Authors>TizenTube Windows Contributors</Authors>
     <Company>TizenTube Windows Contributors</Company>
     <Product>TizenTube Windows</Product>
@@ -33,13 +33,13 @@
     <EmbeddedResource Include="../../src/mods/tizentube.bundle.js" LogicalName="TizenTube.InjectedBundle" />
     <EmbeddedResource Include="../../src/ui/styles.css" LogicalName="TizenTube.InjectedStyles" />
     <EmbeddedResource Include="floating_player.js" LogicalName="TizenTube.FloatingPlayer" />
-    <EmbeddedResource Include="navigation_controls.js" LogicalName="TizenTube.NavigationControls" />
   </ItemGroup>
 
   <ItemGroup>
     <None Update="app\**\*.*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="fixtures\watch.html" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

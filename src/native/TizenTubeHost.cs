@@ -38,12 +38,19 @@ namespace TizenTubeWindows
         public bool WindowPlacementTest { get; set; } = false;
         public bool FloatingHotKeyTest { get; set; } = false;
         public bool FloatingVisualProbe { get; set; } = false;
+        public bool FloatingCycleProbe { get; set; } = false;
+        public bool FloatingFixtureProbe { get; set; } = false;
         public bool TheaterUserProbe { get; set; } = false;
         public bool TheaterRestoreProbe { get; set; } = false;
         public bool PreferencesSetupProbe { get; set; } = false;
         public bool PreferencesRestartProbe { get; set; } = false;
         public bool NavigationBackProbe { get; set; } = false;
         public bool KeyboardShortcutsProbe { get; set; } = false;
+        public bool NavigationPlaybackProbe { get; set; } = false;
+        public bool UnmodifiedWebViewProbe { get; set; } = false;
+        public bool TitlebarProbe { get; set; } = false;
+        public bool SessionSetupProbe { get; set; } = false;
+        public bool SessionRestoreProbe { get; set; } = false;
 
         public static HostOptions Parse(string[] args)
         {
@@ -124,6 +131,15 @@ namespace TizenTubeWindows
                 {
                     options.FloatingVisualProbe = true;
                 }
+                else if (arg == "--floating-cycle-probe")
+                {
+                    options.FloatingCycleProbe = true;
+                }
+                else if (arg == "--floating-fixture-probe")
+                {
+                    options.FloatingFixtureProbe = true;
+                    options.FloatingCycleProbe = true;
+                }
                 else if (arg == "--theater-user-probe")
                 {
                     options.TheaterUserProbe = true;
@@ -136,6 +152,11 @@ namespace TizenTubeWindows
                 else if (arg == "--preferences-restart-probe") options.PreferencesRestartProbe = true;
                 else if (arg == "--navigation-back-probe") options.NavigationBackProbe = true;
                 else if (arg == "--keyboard-shortcuts-probe") options.KeyboardShortcutsProbe = true;
+                else if (arg == "--navigation-playback-probe") options.NavigationPlaybackProbe = true;
+                else if (arg == "--unmodified-webview-probe") options.UnmodifiedWebViewProbe = true;
+                else if (arg == "--titlebar-probe") options.TitlebarProbe = true;
+                else if (arg == "--session-setup-probe") options.SessionSetupProbe = true;
+                else if (arg == "--session-restore-probe") options.SessionRestoreProbe = true;
                 else if (arg == "--help" || arg == "-h")
                 {
                     options.ShowHelp = true;
@@ -181,6 +202,13 @@ namespace TizenTubeWindows
             catch { }
 
             var options = HostOptions.Parse(args);
+            if (args?.Length == 2 && args[0] == "--verify-detached-updater-host")
+                return PortableUpdater.VerifyDetachedUpdaterHost(args[1], Path.Combine(
+                    Path.GetTempPath(), "tizentube-update-smoke-" + Guid.NewGuid().ToString("N")));
+            // A detached copy of the same signed-by-source portable executable
+            // performs replacement only after the original process exits.
+            if (args?.Length == 5 && args[0] == "--apply-update")
+                return PortableUpdater.ApplyVerifiedUpdate(args[1], args[2], args[3], args[4]);
             if (options.ShowHelp)
             {
                 HostOptions.PrintHelp();
@@ -213,6 +241,42 @@ namespace TizenTubeWindows
 
     public class MainWindow : Form
     {
+        [DllImport("user32.dll")]
+        private static extern bool ReleaseCapture();
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wparam, IntPtr lparam);
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern int GetWindowLong(IntPtr hwnd, int index);
+        private const int WmNcHitTest = 0x0084;
+        private const int WmNcLButtonDown = 0x00A1;
+        private const int HtClient = 1;
+        private const int HtCaption = 2;
+        private const int HtLeft = 10;
+        private const int HtRight = 11;
+        private const int HtTop = 12;
+        private const int HtTopLeft = 13;
+        private const int HtTopRight = 14;
+        private const int HtBottom = 15;
+        private const int HtBottomLeft = 16;
+        private const int HtBottomRight = 17;
+        private const int ResizeHitArea = 7;
+        private const int WsSysMenu = 0x00080000;
+        private const int WsMinimizeBox = 0x00020000;
+        private const int WsMaximizeBox = 0x00010000;
+        // Taskbar-click toggling requires the system-menu and minimize styles.
+        // Do NOT add WS_THICKFRAME to a FormBorderStyle.None window: mixing a
+        // WinForms nonclient region with the thick frame rendered a second,
+        // Windows-colored system caption over our dark integrated toolbar.
+        // Resize grips are supplied by ApplyBorderlessHitTest below.
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var cp = base.CreateParams;
+                cp.Style |= WsSysMenu | WsMinimizeBox | WsMaximizeBox;
+                return cp;
+            }
+        }
         [DllImport("psapi.dll")]
         private static extern bool EmptyWorkingSet(IntPtr hProcess);
 
@@ -231,17 +295,22 @@ namespace TizenTubeWindows
 
         private readonly HostOptions options;
         private WebView2 webView;
+        private NavigationToolbar navigationToolbar;
+        private TableLayoutPanel chromeLayout;
         private System.Windows.Forms.Timer memoryTrimTimer;
         private System.Windows.Forms.Timer smokeTestTimer;
         private string appDataDir;
         private string theaterPreferenceFile;
+        private string lastVideoSessionFile;
         private bool theaterRestoreInProgress = false;
         private DateTime lastTheaterRestoreAttemptUtc = DateTime.MinValue;
         private long nativeTheaterRestored = 0;
         private bool floatingVisualProbeStarted = false;
+        private bool floatingCycleProbeStarted = false;
         private bool theaterProbeStarted = false;
         private bool preferencesProbeStarted = false;
         private bool keyboardProbeStarted = false;
+        private bool playbackJourneyProbeStarted = false;
         private long blockedAdCount = 0;
         private long trimCount = 0;
         private long modsInitializedCount = 0;
@@ -286,7 +355,14 @@ namespace TizenTubeWindows
             this.Text = "TizenTube";
             this.Size = new Size(1280, 720);
             this.MinimumSize = new Size(800, 500);
+            // The one compact toolbar owns window controls. The standard
+            // Windows caption is intentionally removed, not duplicated.
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.MaximizeBox = true;
+            this.MinimizeBox = true;
             this.StartPosition = FormStartPosition.CenterScreen;
+            this.MaximizedBounds = Screen.PrimaryScreen.WorkingArea;
+            this.BackColor = Color.FromArgb(15, 15, 15);
             try { this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; }
             catch { this.Icon = SystemIcons.Application; }
 
@@ -305,10 +381,24 @@ namespace TizenTubeWindows
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "TizenTube", this.options.TvMode ? "TVUserData" : "UserData"
             );
+            // CI session runs must not reuse personal Google/WebView profiles.
+            string sessionTestRoot = Environment.GetEnvironmentVariable("TIZENTUBE_TEST_SESSION_DIR");
+            if ((options.SessionSetupProbe || options.SessionRestoreProbe) &&
+                !string.IsNullOrWhiteSpace(sessionTestRoot))
+                appDataDir = Path.Combine(sessionTestRoot, "webview");
             Directory.CreateDirectory(appDataDir);
             theaterPreferenceFile = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "TizenTube", this.options.TvMode ? "tv-theater-preference.json" : "theater-preference.json");
+            lastVideoSessionFile = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "TizenTube", this.options.TvMode ? "tv-last-video-session.json" : "last-video-session.json");
+            if ((options.SessionSetupProbe || options.SessionRestoreProbe) &&
+                !string.IsNullOrWhiteSpace(sessionTestRoot))
+            {
+                theaterPreferenceFile = Path.Combine(sessionTestRoot, "theater-preference.json");
+                lastVideoSessionFile = Path.Combine(sessionTestRoot, "last-video-session.json");
+            }
             // Window layout is independent of WebView2's Google login data.
             windowPlacementFile = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -327,6 +417,19 @@ namespace TizenTubeWindows
             this.Resize += (s, e) => RememberWindowPlacement();
             this.Activated += (s, e) => EnableFocusedFloatingHotkey();
             this.Deactivate += (s, e) => DisableFocusedFloatingHotkey();
+            this.SizeChanged += (s, e) => {
+                if (WindowState == FormWindowState.Maximized &&
+                    !nativeImmersiveActive && !nativeFloatingActive)
+                    MaximizedBounds = Screen.FromControl(this).WorkingArea;
+                navigationToolbar?.SetMaximized(WindowState == FormWindowState.Maximized);
+            };
+
+            if (!this.options.SmokeTest && !this.options.HeadlessMode)
+                this.Shown += async (s, e) => {
+                    await Task.Delay(3500);
+                    if (!IsDisposed && !nativeFloatingActive)
+                        await PortableUpdater.CheckForUpdatesAsync(this, true);
+                };
 
             InitializeWebView();
             SetupMemoryTrimming();
@@ -420,6 +523,264 @@ namespace TizenTubeWindows
                     Console.WriteLine($"[Host Floating Test] float={floated} restore={restored}");
                 });
             }
+            if (this.options.TitlebarProbe && !this.options.HeadlessMode)
+            {
+                this.Shown += async (sender, evt) => {
+                    await Task.Delay(3500);
+                    if (IsDisposed || navigationToolbar == null) { ExitCode = 12; return; }
+                    WindowState = FormWindowState.Normal;
+                    Rectangle bounds = Bounds;
+                    string folder = Path.GetDirectoryName(options.TelemetryFilePath ?? "");
+                    if (string.IsNullOrEmpty(folder)) folder = appDataDir;
+                    Directory.CreateDirectory(folder);
+                    chromeLayout.PerformLayout();
+                    bool webviewBelowBar = chromeLayout.Controls.Contains(webView) &&
+                        chromeLayout.Controls.Contains(navigationToolbar) &&
+                        chromeLayout.GetRow(webView) == 1 &&
+                        chromeLayout.GetRow(navigationToolbar) == 0 &&
+                        webView.PointToScreen(Point.Empty).Y >=
+                            navigationToolbar.PointToScreen(Point.Empty).Y + navigationToolbar.Height;
+                    int windowStyle = GetWindowLong(Handle, -16);
+                    bool nativeTaskbarMinimize = ShowInTaskbar &&
+                        (windowStyle & (WsSysMenu | WsMinimizeBox)) ==
+                            (WsSysMenu | WsMinimizeBox);
+                    bool oneBar = FormBorderStyle == FormBorderStyle.None &&
+                        navigationToolbar.Visible && navigationToolbar.Height == 38 &&
+                        chromeLayout.Controls.Contains(navigationToolbar);
+                    // The toolbar's own DrawToBitmap can be dark while the
+                    // *actual* screen still contains a light Windows caption
+                    // above it. Sample the composed screen at window y+9.
+                    Color topScreenPixel;
+                    using (var realFrame = new Bitmap(1, 1))
+                    using (var graphics = Graphics.FromImage(realFrame))
+                    {
+                        graphics.CopyFromScreen(Left + 155, Top + 9, 0, 0,
+                            new Size(1, 1), CopyPixelOperation.SourceCopy);
+                        topScreenPixel = realFrame.GetPixel(0, 0);
+                    }
+                    bool noNativeCaptionOverlay =
+                        topScreenPixel.R < 95 && topScreenPixel.G < 95 &&
+                        topScreenPixel.B < 95;
+                    navigationToolbar.InvokeMaximizeForProbe();
+                    await Task.Delay(300);
+                    bool maximized = WindowState == FormWindowState.Maximized &&
+                        navigationToolbar.IsMaximized &&
+                        MaximizedBounds == Screen.FromControl(this).WorkingArea;
+                    // The screenshot showed a thin desktop-colored frame.
+                    // Test the HWND client origin, not just WinForms state.
+                    var client = new Rectangle(PointToScreen(ClientRectangle.Location),
+                        ClientRectangle.Size);
+                    bool maximizedClientFillsWorkArea =
+                        client == Screen.FromControl(this).WorkingArea;
+                    navigationToolbar.InvokeMaximizeForProbe();
+                    await Task.Delay(300);
+                    bool restored = WindowState == FormWindowState.Normal &&
+                        !navigationToolbar.IsMaximized && FormBorderStyle == FormBorderStyle.None;
+                    navigationToolbar.InvokeMinimizeForProbe();
+                    await Task.Delay(300);
+                    bool minimized = WindowState == FormWindowState.Minimized;
+                    WindowState = FormWindowState.Normal;
+                    Bounds = bounds;
+                    using (var bitmap = new Bitmap(navigationToolbar.Width, navigationToolbar.Height))
+                    {
+                        navigationToolbar.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
+                        bitmap.Save(Path.Combine(folder, "titlebar-integrated.png"),
+                            System.Drawing.Imaging.ImageFormat.Png);
+                    }
+                    var proof = new { oneBar, noNativeCaptionOverlay,
+                        topScreenPixel = new { topScreenPixel.R, topScreenPixel.G, topScreenPixel.B },
+                        maximized, maximizedClientFillsWorkArea,
+                        maxClient = client.ToString(),
+                        workArea = Screen.FromControl(this).WorkingArea.ToString(),
+                        restored, minimized,
+                        webviewBelowBar, nativeTaskbarMinimize,
+                        height = navigationToolbar.Height, border = FormBorderStyle.ToString() };
+                    File.WriteAllText(Path.Combine(folder, "titlebar-acceptance.json"),
+                        System.Text.Json.JsonSerializer.Serialize(proof));
+                    if (!oneBar || !noNativeCaptionOverlay ||
+                        !webviewBelowBar || !nativeTaskbarMinimize ||
+                        !maximized || !maximizedClientFillsWorkArea ||
+                        !restored || !minimized) ExitCode = 12;
+                    Console.WriteLine($"[Titlebar] oneBar={oneBar} maximized={maximized} restored={restored} minimized={minimized}");
+                };
+            }
+            if ((this.options.SessionSetupProbe || this.options.SessionRestoreProbe) &&
+                !this.options.HeadlessMode)
+            {
+                this.Shown += async (sender, evt) => {
+                    await Task.Delay(options.SessionSetupProbe ? 7000 : 11000);
+                    if (IsDisposed || webView?.CoreWebView2 == null) { ExitCode = 14; return; }
+                    string folder = Path.GetDirectoryName(options.TelemetryFilePath ?? "");
+                    if (string.IsNullOrEmpty(folder)) folder = appDataDir;
+                    Directory.CreateDirectory(folder);
+                    try
+                    {
+                        if (options.SessionSetupProbe)
+                        {
+                            // Simulate a durable checkpoint without inventing
+                            // functional video playback in a cloud runner.
+                            string proof = await webView.CoreWebView2.ExecuteScriptAsync(
+                                "(() => {const state={id:'aqz-KE-bpKQ',position:137," +
+                                "duration:2100,updatedAt:Date.now()};" +
+                                "localStorage.setItem('tizentube.lastVideo.v1',JSON.stringify(state));" +
+                                "localStorage.setItem('tizentube.theater.v1','true');" +
+                                "return {saved:localStorage.getItem('tizentube.lastVideo.v1')!==null};})()");
+                            File.WriteAllText(Path.Combine(folder, "session-setup.json"), proof);
+                            File.WriteAllText(theaterPreferenceFile, "true");
+                            string sessionJson = "{\"id\":\"aqz-KE-bpKQ\",\"position\":137,\"duration\":2100,\"updatedAt\":" +
+                                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + "}";
+                            File.WriteAllText(lastVideoSessionFile, sessionJson);
+                            if (!proof.Contains("\"saved\":true")) ExitCode = 14;
+                        }
+                        else
+                        {
+                            string state = await webView.CoreWebView2.ExecuteScriptAsync(
+                                "(() => ({href:location.href,theater:" +
+                                "window.__TIZENTUBE_LOADER__?.viewing?.savedTheaterState?.()??null}))()");
+                            File.WriteAllText(Path.Combine(folder, "session-reopen.json"), state);
+                            if (!state.Contains("aqz-KE-bpKQ") || !state.Contains("t=137s") ||
+                                !state.Contains("\"theater\":true")) ExitCode = 14;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine("[Host Session Probe] " + ex.Message);
+                        ExitCode = 14;
+                    }
+                };
+            }
+        }
+
+        private void SetupNavigationToolbar()
+        {
+            navigationToolbar = new NavigationToolbar(this.Icon,
+                () => {
+                    if (webView?.CoreWebView2?.CanGoBack == true)
+                        webView.CoreWebView2.GoBack();
+                },
+                () => {
+                    webView?.CoreWebView2?.Reload();
+                },
+                DragNativeWindow,
+                () => { WindowState = FormWindowState.Minimized; },
+                ToggleNativeMaximize,
+                () => { Close(); },
+                () => { _ = ToggleFloatingWindowAsync(true); },
+                () => { _ = ShowProtectionsAsync(); },
+                () => { _ = PortableUpdater.CheckForUpdatesAsync(this, false); });
+            navigationToolbar.Dock = DockStyle.Fill;
+            navigationToolbar.Margin = Padding.Empty;
+            chromeLayout.Controls.Add(navigationToolbar, 0, 0);
+            navigationToolbar.SetMaximized(WindowState == FormWindowState.Maximized);
+            UpdateNavigationToolbarVisibility();
+        }
+
+        private async Task ShowProtectionsAsync()
+        {
+            if (webView?.CoreWebView2 == null)
+            {
+                MessageBox.Show("El navegador todavía está iniciándose.", "TizenTube");
+                return;
+            }
+            try
+            {
+                // Read the actual initialized JS module, never infer enabled
+                // status from bundle presence or the presence of a badge.
+                string info = await webView.CoreWebView2.ExecuteScriptAsync(
+                    "(() => {const l=window.__TIZENTUBE_LOADER__;" +
+                    "if(!l?.initialized)return 'Los módulos todavía no están activos';" +
+                    "const s=l.sponsorblock;const a=l.adblock;" +
+                    "const st=s?.getStats?.()||{};const v=l.playback?.videoElement;" +
+                    "const labels={no_video:'sin vídeo detectado',loading:'consultando API'," +
+                    "segments_found:'segmentos recibidos',no_segments:'sin segmentos registrados'," +
+                    "network_error:'fallo al consultar API',rate_limited:'API con límite de solicitudes'," +
+                    "unavailable:'API temporalmente no disponible'};" +
+                    "return ['SponsorBlock: '+(s?.options?.enabled?'activo':'desactivado')," +
+                    "'Saltar segmentos automáticamente: '+(s?.options?.autoSkip?'sí':'no')," +
+                    "'Vídeo identificado: '+(st.currentVideoId||'ninguno')," +
+                    "'Reproductor conectado: '+(v?'sí':'no')," +
+                    "'Consulta: '+(labels[st.lastFetchStatus]||'desconocida')," +
+                    "'Segmentos del vídeo: '+(st.segmentCount??0)," +
+                    "'Saltos realizados: '+(st.skipCount??0)," +
+                    "'AdBlock: '+(a?.options?.enabled?'activo':'desactivado')].join(String.fromCharCode(10));})()");
+                string state = System.Text.Json.JsonSerializer.Deserialize<string>(info)
+                    ?? "No se pudo leer el estado.";
+                if (MessageBox.Show(state + "\n\n¿Abrir ajustes de protecciones?", "Protecciones TizenTube",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
+                    await webView.CoreWebView2.ExecuteScriptAsync(
+                        "window.__TIZENTUBE_LOADER__?.ui?.settingsModal?.open?.();");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("No se pudo consultar SponsorBlock: " + ex.Message,
+                    "TizenTube", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void DragNativeWindow()
+        {
+            if (nativeImmersiveActive) return;
+            // Send a native NC caption interaction to preserve Windows drag,
+            // Aero Snap and the standard window move behavior.
+            ReleaseCapture();
+            SendMessage(Handle, WmNcLButtonDown, (IntPtr)HtCaption, IntPtr.Zero);
+        }
+
+        private void ToggleNativeMaximize()
+        {
+            if (nativeImmersiveActive || nativeFloatingActive) return;
+            if (WindowState == FormWindowState.Maximized)
+                WindowState = FormWindowState.Normal;
+            else
+            {
+                MaximizedBounds = Screen.FromControl(this).WorkingArea;
+                WindowState = FormWindowState.Maximized;
+            }
+            navigationToolbar?.SetMaximized(WindowState == FormWindowState.Maximized);
+        }
+
+        private void ApplyBorderlessHitTest(ref Message m)
+        {
+            if (m.Msg != WmNcHitTest || m.Result.ToInt64() != HtClient ||
+                WindowState != FormWindowState.Normal ||
+                nativeImmersiveActive ||
+                FormBorderStyle != FormBorderStyle.None) return;
+            // A borderless Windows form normally cannot be resized. Return
+            // genuine non-client hit-test codes for the screen-edge grips.
+            Point point = PointToClient(Cursor.Position);
+            bool left = point.X >= 0 && point.X < ResizeHitArea;
+            bool right = point.X <= Width && point.X >= Width - ResizeHitArea;
+            bool top = point.Y >= 0 && point.Y < ResizeHitArea;
+            bool bottom = point.Y <= Height && point.Y >= Height - ResizeHitArea;
+            if (left && top) m.Result = (IntPtr)HtTopLeft;
+            else if (right && top) m.Result = (IntPtr)HtTopRight;
+            else if (left && bottom) m.Result = (IntPtr)HtBottomLeft;
+            else if (right && bottom) m.Result = (IntPtr)HtBottomRight;
+            else if (left) m.Result = (IntPtr)HtLeft;
+            else if (right) m.Result = (IntPtr)HtRight;
+            else if (top) m.Result = (IntPtr)HtTop;
+            else if (bottom) m.Result = (IntPtr)HtBottom;
+        }
+        private void UpdateNavigationToolbar()
+        {
+            if (navigationToolbar == null || IsDisposed || webView?.CoreWebView2 == null) return;
+            navigationToolbar.SetBackEnabled(webView.CoreWebView2.CanGoBack);
+            // DocumentTitleChanged includes YouTube's current video title;
+            // no URL, account or browsing history is copied out of WebView2.
+            navigationToolbar.SetTitle(webView.CoreWebView2.DocumentTitle);
+        }
+
+        private void UpdateNavigationToolbarVisibility()
+        {
+            if (navigationToolbar == null || chromeLayout == null || IsDisposed) return;
+            bool visible = !nativeImmersiveActive;
+            chromeLayout.SuspendLayout();
+            try
+            {
+                chromeLayout.RowStyles[0].Height = visible ? 38 : 0;
+                navigationToolbar.Visible = visible;
+            }
+            finally { chromeLayout.ResumeLayout(true); }
         }
 
         private async void InitializeWebView()
@@ -427,7 +788,22 @@ namespace TizenTubeWindows
             try
             {
                 webView = new WebView2 { Dock = DockStyle.Fill };
-                this.Controls.Add(webView);
+                webView.Margin = Padding.Empty;
+                webView.DefaultBackgroundColor = Color.FromArgb(15, 15, 15);
+                // A dedicated layout row prevents the native bar from
+                // overlapping YouTube. Fullscreen collapses that row.
+                chromeLayout = new TableLayoutPanel {
+                    Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2,
+                    Margin = Padding.Empty, Padding = Padding.Empty,
+                    BackColor = Color.FromArgb(15, 15, 15)
+                };
+                chromeLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+                chromeLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 38f));
+                chromeLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+                this.Controls.Add(chromeLayout);
+                chromeLayout.Controls.Add(webView, 0, 1);
+                // Navigation is host-owned, not injected into YouTube's masthead.
+                SetupNavigationToolbar();
 
                 // Memory-optimized Chromium CLI arguments:
                 // 1. --renderer-process-limit=1: Restricts Chromium to a single renderer process
@@ -448,18 +824,44 @@ namespace TizenTubeWindows
                     "--enable-font-antialiasing " +
                     "--force-color-profile=srgb";
 
-                var envOptions = new CoreWebView2EnvironmentOptions(chromiumArgs);
-                var env = await CoreWebView2Environment.CreateAsync(null, appDataDir, envOptions);
+                // Clean control case: no custom Chromium memory/GPU flags,
+                // no production WebView profile, no mod injections/filters.
+                var envOptions = options.UnmodifiedWebViewProbe
+                    ? new CoreWebView2EnvironmentOptions()
+                    : new CoreWebView2EnvironmentOptions(chromiumArgs);
+                var browserProfile = options.UnmodifiedWebViewProbe
+                    ? Path.Combine(appDataDir, "diagnostic-unmodified")
+                    : appDataDir;
+                var env = await CoreWebView2Environment.CreateAsync(null, browserProfile, envOptions);
                 await webView.EnsureCoreWebView2Async(env);
+                if (options.FloatingFixtureProbe)
+                {
+                    // Test-only virtual HTTPS origin, resolved entirely from local files.
+                    // It exercises real WebView2 video compositing and native window moves
+                    // even when YouTube rejects anonymous datacenter playback.
+                    var fixtureRoot = Path.Combine(AppContext.BaseDirectory, "fixtures");
+                    if (!File.Exists(Path.Combine(fixtureRoot, "watch.html")))
+                        throw new FileNotFoundException("Offline playback fixture is missing");
+                    webView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                        "tizentube-fixture.invalid", fixtureRoot,
+                        CoreWebView2HostResourceAccessKind.DenyCors);
+                }
+                webView.CoreWebView2.HistoryChanged += (sender, eventArgs) => UpdateNavigationToolbar();
+                webView.CoreWebView2.SourceChanged += (sender, eventArgs) => UpdateNavigationToolbar();
+                webView.CoreWebView2.DocumentTitleChanged += (sender, eventArgs) => UpdateNavigationToolbar();
+                UpdateNavigationToolbar();
 
                 ConfigureWebViewSettings();
                 SetupFloatingAccelerators();
                 SetupLifecycleDiagnostics();
-                SetupNetworkAdBlocker();
+                // Diagnostic-only unmodified WebView2 isolates whether native
+                // YouTube's playback fails without any of our interception.
+                // Not an undocumented production fallback or a bypass of login.
+                if (!options.UnmodifiedWebViewProbe) SetupNetworkAdBlocker();
                 SetupFullscreenHandling();
                 SetupIpcBridge();
                 SetupAdblockDiagnosticMenu();
-                await InjectModsAsync();
+                if (!options.UnmodifiedWebViewProbe) await InjectModsAsync();
 
                 if (options.FloatingVisualProbe)
                 {
@@ -468,6 +870,15 @@ namespace TizenTubeWindows
                         if (!nav.IsSuccess || floatingVisualProbeStarted || IsDisposed) return;
                         floatingVisualProbeStarted = true;
                         await CaptureFloatingVisualProbeAsync();
+                    };
+                }
+                if (options.FloatingCycleProbe)
+                {
+                    webView.CoreWebView2.NavigationCompleted += async (sender, nav) =>
+                    {
+                        if (!nav.IsSuccess || floatingCycleProbeStarted || IsDisposed) return;
+                        floatingCycleProbeStarted = true;
+                        await CaptureFloatingCycleProbeAsync();
                     };
                 }
                 if (options.TheaterUserProbe || options.TheaterRestoreProbe)
@@ -499,7 +910,19 @@ namespace TizenTubeWindows
                     };
                 }
 
-                string navUrl = !string.IsNullOrEmpty(options.InitialUrl) ? options.InitialUrl : "https://www.youtube.com";
+                if (options.NavigationPlaybackProbe)
+                {
+                    webView.CoreWebView2.NavigationCompleted += async (sender, nav) =>
+                    {
+                        if (!nav.IsSuccess || playbackJourneyProbeStarted || IsDisposed) return;
+                        playbackJourneyProbeStarted = true;
+                        await CaptureNavigationPlaybackProbeAsync();
+                    };
+                }
+
+                string navUrl = options.FloatingFixtureProbe
+                    ? "https://tizentube-fixture.invalid/watch.html"
+                    : (!string.IsNullOrEmpty(options.InitialUrl) ? options.InitialUrl : GetDefaultLaunchUrl());
                 webView.Source = new Uri(navUrl);
             }
             catch (Exception ex)
@@ -593,6 +1016,9 @@ namespace TizenTubeWindows
 
         protected override void WndProc(ref Message m)
         {
+            // Leave WM_NCCALCSIZE to WinForms. Forcing a zero nonclient area
+            // on a thick-frame window caused a native caption to reappear in
+            // preview.14 on real hardware. No WS_THICKFRAME is set anymore.
             if (m.Msg == WmHotKey && m.WParam.ToInt32() == FloatingHotKeyId)
             {
                 Interlocked.Increment(ref floatingHotKeyWindowsTriggered);
@@ -600,6 +1026,7 @@ namespace TizenTubeWindows
                 return;
             }
             base.WndProc(ref m);
+            ApplyBorderlessHitTest(ref m);
         }
 
         private void RememberWindowPlacement()
@@ -790,6 +1217,7 @@ namespace TizenTubeWindows
             {
                 SetNativeFloatingWindow(false);
                 _ = webView?.CoreWebView2?.ExecuteScriptAsync(
+                    "window.__ttFloating?.stop();" +
                     "document.documentElement.classList.remove('tt-floating-mode');" +
                     "document.getElementById('tizentube-native-pip')?.setAttribute('aria-pressed','false');");
             }
@@ -811,6 +1239,9 @@ namespace TizenTubeWindows
                 this.Bounds = Screen.FromControl(this).Bounds;
                 this.TopMost = true;
                 this.ResumeLayout();
+                UpdateNavigationToolbarVisibility();
+                _ = webView?.CoreWebView2?.ExecuteScriptAsync(
+                    "window.__ttNativeFullscreen = true;");
             }
             else
             {
@@ -822,10 +1253,16 @@ namespace TizenTubeWindows
                 if (boundsBeforeFullscreen.Width > 0 && boundsBeforeFullscreen.Height > 0)
                     this.Bounds = boundsBeforeFullscreen;
                 if (stateBeforeFullscreen == FormWindowState.Maximized)
+                {
+                    MaximizedBounds = Screen.FromControl(this).WorkingArea;
                     this.WindowState = FormWindowState.Maximized;
+                }
                 // Do not restore Minimized: a user exiting video fullscreen
                 // should always see a usable window.
                 this.ResumeLayout();
+                UpdateNavigationToolbarVisibility();
+                _ = webView?.CoreWebView2?.ExecuteScriptAsync(
+                    "window.__ttNativeFullscreen = false; window.dispatchEvent(new Event('resize'));");
             }
         }
 
@@ -850,14 +1287,15 @@ namespace TizenTubeWindows
                     nativeFloatingActive = true;
                     WindowState = FormWindowState.Normal;
                     MinimumSize = new Size(320, 220);
-                    FormBorderStyle = FormBorderStyle.SizableToolWindow;
-                    Text = "TizenTube · Reproductor flotante";
+                    FormBorderStyle = FormBorderStyle.None;
                     var area = Screen.FromControl(this).WorkingArea;
                     int w = Math.Min(500, Math.Max(330, area.Width - 35));
-                    int h = (int)Math.Round(w * 9.0 / 16.0) + 36;
+                    int h = (int)Math.Round(w * 9.0 / 16.0) + 38;
                     Bounds = new Rectangle(area.Right - w - 22,
                         area.Bottom - h - 22, w, h);
                     TopMost = true;
+                    navigationToolbar?.SetFloatingMode(true);
+                    UpdateNavigationToolbar();
                     Activate();
                 }
                 else
@@ -870,11 +1308,177 @@ namespace TizenTubeWindows
                     if (boundsBeforeFloating.Width > 0 && boundsBeforeFloating.Height > 0)
                         Bounds = boundsBeforeFloating;
                     if (stateBeforeFloating == FormWindowState.Maximized)
+                    {
+                        MaximizedBounds = Screen.FromControl(this).WorkingArea;
                         WindowState = FormWindowState.Maximized;
-                    Text = "TizenTube";
+                    }
+                    navigationToolbar?.SetFloatingMode(false);
+                    UpdateNavigationToolbar();
                 }
             }
-            finally { ResumeLayout(); }
+            finally
+            {
+                UpdateNavigationToolbarVisibility();
+                ResumeLayout();
+            }
+        }
+
+        private async Task<string> ClickVideoLinkWithTrustedPointerAsync(
+            string selector, string excludeId, string method)
+        {
+            // HTMLElement.click() can update YouTube's SPA URL without ever
+            // initializing its media player. Use a real CDP pointer event,
+            // including viewport hit-testing, as we already do for theater.
+            try
+            {
+                string selectors = System.Text.Json.JsonSerializer.Serialize(selector);
+                string excluded = System.Text.Json.JsonSerializer.Serialize(excludeId ?? "");
+                string script = "(() => {const nodes=[...document.querySelectorAll(" + selectors + ")];" +
+                    "const a=nodes.find(e=>{try{const u=new URL(e.href);" +
+                    "return u.pathname==='/watch' && !!u.searchParams.get('v') && " +
+                    "u.searchParams.get('v')!==" + excluded + "}catch{return false}});" +
+                    "if(!a)return null;a.scrollIntoView({block:'center'});" +
+                    "const r=a.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;" +
+                    "const hit=document.elementFromPoint(x,y);" +
+                    "if(r.width<10||r.height<10||!hit||!(a===hit||a.contains(hit)))return null;" +
+                    "return {id:new URL(a.href).searchParams.get('v'),x,y};})()";
+                string response = await webView.CoreWebView2.ExecuteScriptAsync(script);
+                if (response == "null") return "{\"clicked\":false}";
+                using (var json = System.Text.Json.JsonDocument.Parse(response))
+                {
+                    var item = json.RootElement;
+                    string id = item.GetProperty("id").GetString() ?? "";
+                    double x = item.GetProperty("x").GetDouble();
+                    double y = item.GetProperty("y").GetDouble();
+                    if (id.Length != 11 || x < 0 || y < 0 ||
+                        x >= webView.Width || y >= webView.Height)
+                        return "{\"clicked\":false}";
+                    string move = System.Text.Json.JsonSerializer.Serialize(new {
+                        type = "mouseMoved", x, y });
+                    string press = System.Text.Json.JsonSerializer.Serialize(new {
+                        type = "mousePressed", x, y, button = "left", clickCount = 1 });
+                    string release = System.Text.Json.JsonSerializer.Serialize(new {
+                        type = "mouseReleased", x, y, button = "left", clickCount = 1 });
+                    await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                        "Input.dispatchMouseEvent", move);
+                    await Task.Delay(180);
+                    await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                        "Input.dispatchMouseEvent", press);
+                    await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
+                        "Input.dispatchMouseEvent", release);
+                    return System.Text.Json.JsonSerializer.Serialize(new {
+                        clicked = true, id, method = "trusted-" + method });
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("[Host Journey Click] " + ex.Message);
+                return "{\"clicked\":false}";
+            }
+        }
+
+        private async Task CaptureNavigationPlaybackProbeAsync()
+        {
+            // Acceptance: start from HOME, click an actual feed thumbnail, play
+            // and then click a different related video. No test-only watch URL.
+            // Only anonymous numerical media state is exported.
+            try
+            {
+                string folder = Path.GetDirectoryName(options.TelemetryFilePath ?? "");
+                if (string.IsNullOrEmpty(folder)) folder = appDataDir;
+                Directory.CreateDirectory(folder);
+                await Task.Delay(13000);
+                if (IsDisposed || webView?.CoreWebView2 == null) return;
+
+                string home = "(() => ({path:location.pathname," +
+                    "ytApp:!!document.querySelector('ytd-app')," +
+                    "feedLinks:document.querySelectorAll(" +
+                    "'ytd-rich-grid-media a#thumbnail[href*=\\\"watch\\\"],ytd-video-renderer a#video-title').length}))()";
+                File.WriteAllText(Path.Combine(folder, "journey-home.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(home));
+
+                string firstClickResult = await ClickVideoLinkWithTrustedPointerAsync(
+                    "ytd-rich-grid-media a#thumbnail,ytd-video-renderer a#video-title", "", "feed");
+                if (firstClickResult.Contains("\"clicked\":false"))
+                {
+                    // A signed-out YouTube home can legitimately contain no
+                    // recommendations. Search still needs to return clickable
+                    // content and a playable video.
+                    await webView.CoreWebView2.ExecuteScriptAsync(
+                        "location.assign('https://www.youtube.com/results?search_query=big+buck+bunny')");
+                    await Task.Delay(12000);
+                    firstClickResult = await ClickVideoLinkWithTrustedPointerAsync(
+                        "ytd-video-renderer a#video-title,ytd-video-renderer a#thumbnail", "", "search");
+                }
+                File.WriteAllText(Path.Combine(folder, "journey-first-click.json"), firstClickResult);
+
+                await Task.Delay(14000);
+                string media = "(() => {const v=document.querySelector('video.html5-main-video');" +
+                    "const id=new URL(location.href).searchParams.get('v');" +
+                    "const p=window.ytInitialPlayerResponse?.playabilityStatus;" +
+                    "const message=document.querySelector('yt-player-error-message-renderer,.ytp-error');" +
+                    "return {id,watch:location.pathname==='/watch',readyState:v?.readyState??0," +
+                    "width:v?.videoWidth??0,time:v?.currentTime??0,paused:v?.paused??true," +
+                    "duration:Number.isFinite(v?.duration)?v.duration:0," +
+                    "error:!!document.querySelector('.ytp-error')," +
+                    "mediaErrorCode:v?.error?.code??null," +
+                    "playabilityStatus:p?.status??null," +
+                    "playabilityReason:String(p?.reason||'').slice(0,160)," +
+                    "errorLabel:(message?.textContent||'').slice(0,160)};})()";
+                // A click can reach /watch with playback paused due autoplay
+                // policies. Trigger the same player play control as a user.
+                await webView.CoreWebView2.ExecuteScriptAsync(
+                    "document.querySelector('video.html5-main-video')?.play()?.catch(()=>{});");
+                await Task.Delay(2800);
+                File.WriteAllText(Path.Combine(folder, "journey-first-before.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(media));
+                await Task.Delay(3900);
+                File.WriteAllText(Path.Combine(folder, "journey-first-after.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(media));
+                // Guest-only screenshot for diagnosing YouTube's challenge UI
+                // when a Windows cloud runner receives no playable stream.
+                using (var capture = File.Create(Path.Combine(folder, "journey-first-frame.png")))
+                    await webView.CoreWebView2.CapturePreviewAsync(
+                        CoreWebView2CapturePreviewImageFormat.Png, capture);
+
+                string firstId = "";
+                try
+                {
+                    using (var parsed = System.Text.Json.JsonDocument.Parse(firstClickResult))
+                        firstId = parsed.RootElement.GetProperty("id").GetString() ?? "";
+                }
+                catch { }
+                string secondClickResult = await ClickVideoLinkWithTrustedPointerAsync(
+                    "ytd-compact-video-renderer a#thumbnail,ytd-watch-next-secondary-results-renderer a#thumbnail",
+                    firstId, "related");
+                if (secondClickResult.Contains("\"clicked\":false"))
+                {
+                    // Return to discovery and click another *actual* result.
+                    await webView.CoreWebView2.ExecuteScriptAsync("history.back()");
+                    await Task.Delay(8000);
+                    secondClickResult = await ClickVideoLinkWithTrustedPointerAsync(
+                        "ytd-video-renderer a#video-title,ytd-rich-grid-media a#thumbnail",
+                        firstId, "back-to-results");
+                }
+                File.WriteAllText(Path.Combine(folder, "journey-second-click.json"), secondClickResult);
+                await Task.Delay(15000);
+                await webView.CoreWebView2.ExecuteScriptAsync(
+                    "document.querySelector('video.html5-main-video')?.play()?.catch(()=>{});");
+                await Task.Delay(2900);
+                File.WriteAllText(Path.Combine(folder, "journey-second-before.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(media));
+                await Task.Delay(4000);
+                File.WriteAllText(Path.Combine(folder, "journey-second-after.json"),
+                    await webView.CoreWebView2.ExecuteScriptAsync(media));
+                using (var capture = File.Create(Path.Combine(folder, "journey-second-frame.png")))
+                    await webView.CoreWebView2.CapturePreviewAsync(
+                        CoreWebView2CapturePreviewImageFormat.Png, capture);
+                Console.WriteLine("[Host Journey] Guest home/feed/video-to-video evidence exported");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("[Host Journey] " + ex.Message);
+            }
         }
 
         private async Task CaptureKeyboardShortcutsProbeAsync()
@@ -969,6 +1573,141 @@ namespace TizenTubeWindows
                 await ToggleFloatingWindowAsync(true);
             }
             catch (Exception ex) { Console.Error.WriteLine("[Host PiP Probe] " + ex.Message); }
+        }
+
+        private string GetDefaultLaunchUrl()
+        {
+            try
+            {
+                if (File.Exists(lastVideoSessionFile))
+                {
+                    string json = File.ReadAllText(lastVideoSessionFile);
+                    using (var doc = System.Text.Json.JsonDocument.Parse(json))
+                    {
+                        var root = doc.RootElement;
+                        if (root.TryGetProperty("id", out var idProp))
+                        {
+                            string id = idProp.GetString();
+                            if (!string.IsNullOrEmpty(id) && id.Length == 11)
+                            {
+                                int pos = 0;
+                                if (root.TryGetProperty("position", out var posProp))
+                                    pos = posProp.GetInt32();
+                                return $"https://www.youtube.com/watch?v={id}&t={Math.Max(0, pos)}s";
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+            return "https://www.youtube.com";
+        }
+
+        private async Task CaptureFloatingCycleProbeAsync()
+        {
+            try
+            {
+                string folder = Path.GetDirectoryName(options.TelemetryFilePath ?? "");
+                if (string.IsNullOrEmpty(folder)) folder = appDataDir;
+                Directory.CreateDirectory(folder);
+
+                string probeScript = "(() => {const v=document.querySelector('video.html5-main-video');" +
+                    "const f=document.querySelector('ytd-watch-flexy');" +
+                    "const floatDiag=window.__ttFloating?.diagnostics?.() || null;" +
+                    "return {readyState:v?.readyState??-1,videoWidth:v?.videoWidth??0," +
+                    "currentTime:v?.currentTime??0,paused:v?.paused??true," +
+                    "theater:f?f.hasAttribute('theater'):false," +
+                    "floating:floatDiag?.active??false," +
+                    "playerInBody:floatDiag?.playerInBody??false," +
+                    "fullscreen:!!(document.fullscreenElement || document.querySelector('.ytp-fullscreen') || window.__ttNativeFullscreen)};})()";
+
+                var pixelChecks = new Dictionary<string, string>();
+
+                // A decoded mediaWidth/time-only check can miss a black GPU
+                // compositor surface. Use actual WebView2 screenshots of the
+                // locally generated colored frames on every native transition.
+                async Task CaptureVisibleFixtureAsync(string stage)
+                {
+                    if (!options.FloatingFixtureProbe) return;
+                    string screenshotPath = Path.Combine(folder, $"cycle-{stage}.png");
+                    using (var stream = File.Create(screenshotPath))
+                        await webView.CoreWebView2.CapturePreviewAsync(
+                            CoreWebView2CapturePreviewImageFormat.Png, stream);
+                    using (var image = new Bitmap(screenshotPath))
+                    {
+                        var center = image.GetPixel(image.Width / 2, image.Height / 2);
+                        if (center.R + center.G + center.B < 30)
+                            throw new InvalidOperationException(
+                                $"OFFLINE_MEDIA_BLACK_CENTER:{stage}:{center.R},{center.G},{center.B}");
+                        pixelChecks[stage] = $"R={center.R},G={center.G},B={center.B}";
+                    }
+                }
+
+                await Task.Delay(10000);
+                if (IsDisposed || webView?.CoreWebView2 == null) return;
+
+                // 1. Normal
+                string s1 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
+                File.WriteAllText(Path.Combine(folder, "cycle-01-normal.json"), s1);
+                await CaptureVisibleFixtureAsync("01-normal");
+
+                // 2. Theater
+                await webView.CoreWebView2.ExecuteScriptAsync(
+                    "(() => { const f=document.querySelector('ytd-watch-flexy'); " +
+                    "if (f && !f.hasAttribute('theater')) { " +
+                    "  const b=document.querySelector('.ytp-size-button'); b?.click(); " +
+                    "} })()");
+                await Task.Delay(1200);
+                string s2 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
+                File.WriteAllText(Path.Combine(folder, "cycle-02-theater.json"), s2);
+                await CaptureVisibleFixtureAsync("02-theater");
+
+                // 3. Floating
+                await ToggleFloatingWindowAsync(false);
+                await Task.Delay(1500);
+                string s3 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
+                File.WriteAllText(Path.Combine(folder, "cycle-03-floating.json"), s3);
+                await CaptureVisibleFixtureAsync("03-floating");
+
+                // 4. Fullscreen
+                await webView.CoreWebView2.ExecuteScriptAsync(
+                    "window.__ttFloating?.stop(); window.__ttNativeFullscreen = true; " +
+                    "try { const b = document.querySelector('.ytp-fullscreen-button'); if (b) b.click(); } catch (_) {}");
+                webPlayerFullscreen = true;
+                UpdateNativeImmersiveMode();
+                await Task.Delay(1500);
+                string s4 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
+                File.WriteAllText(Path.Combine(folder, "cycle-04-fullscreen.json"), s4);
+                await CaptureVisibleFixtureAsync("04-fullscreen");
+
+                // 5. Return
+                await webView.CoreWebView2.ExecuteScriptAsync(
+                    "window.__ttNativeFullscreen = false; " +
+                    "try { if (document.fullscreenElement) document.exitFullscreen(); } catch (_) {}");
+                webPlayerFullscreen = false;
+                UpdateNativeImmersiveMode();
+                await Task.Delay(1500);
+                string s5 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
+                File.WriteAllText(Path.Combine(folder, "cycle-05-return.json"), s5);
+                await CaptureVisibleFixtureAsync("05-return");
+
+                var summary = new {
+                    success = true,
+                    pixelChecks = pixelChecks,
+                    step1_normal = System.Text.Json.JsonDocument.Parse(s1).RootElement,
+                    step2_theater = System.Text.Json.JsonDocument.Parse(s2).RootElement,
+                    step3_floating = System.Text.Json.JsonDocument.Parse(s3).RootElement,
+                    step4_fullscreen = System.Text.Json.JsonDocument.Parse(s4).RootElement,
+                    step5_return = System.Text.Json.JsonDocument.Parse(s5).RootElement
+                };
+                File.WriteAllText(Path.Combine(folder, "floating-cycle-summary.json"),
+                    System.Text.Json.JsonSerializer.Serialize(summary));
+                Console.WriteLine("[Host Cycle Probe] P0 Floating cycle probe completed successfully");
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("[Host Cycle Probe] Error: " + ex.Message);
+            }
         }
 
         private async Task CaptureTheaterProbeAsync()
@@ -1133,12 +1872,28 @@ namespace TizenTubeWindows
                 }
                 if (options.NavigationBackProbe)
                 {
-                    string navTest = "(() => {const back=document.getElementById('tizentube-masthead-back');" +
-                        "if(!back)return null;const original=location.pathname+location.search;" +
+                    // Exercise the native toolbar (not an in-page DOM element).
+                    string navTest = "(() => {const original=location.pathname+location.search;" +
                         "history.pushState({ttTest:true},'', '/results?search_query=tizentube-ci-back');" +
-                        "const pushed=location.pathname;back.click();" +
-                        "return {found:true,original,pushed};})()";
+                        "return {original,pushed:location.pathname};})()";
                     string initial = await webView.CoreWebView2.ExecuteScriptAsync(navTest);
+                    await Task.Delay(500);
+                    UpdateNavigationToolbar();
+                    bool nativeToolbarPresent = navigationToolbar != null &&
+                        navigationToolbar.Visible;
+                    bool nativeToolbarEnabled = navigationToolbar?.BackEnabled == true;
+                    bool nativeToolbarClicked = navigationToolbar?.InvokeBackForProbe() == true;
+                    // Windows-native raster proof: catch white HTML-sized controls.
+                    if (navigationToolbar != null && navigationToolbar.Width >= 110)
+                    {
+                        using (var bitmap = new Bitmap(navigationToolbar.Width, navigationToolbar.Height))
+                        {
+                            navigationToolbar.DrawToBitmap(bitmap,
+                                new Rectangle(Point.Empty, bitmap.Size));
+                            bitmap.Save(Path.Combine(folder, "navigation-toolbar.png"),
+                                System.Drawing.Imaging.ImageFormat.Png);
+                        }
+                    }
                     string now = "null";
                     string nativePath = "";
                     // Record initial evidence BEFORE page transition queries.
@@ -1146,7 +1901,10 @@ namespace TizenTubeWindows
                     // consuming the smoke timeout without any diagnostic.
                     string proofFile = Path.Combine(folder, "navigation-back.json");
                     File.WriteAllText(proofFile,
-                        "{\"request\":" + initial + ",\"result\":null,\"nativeSource\":\"\"}");
+                        "{\"request\":" + initial + ",\"result\":null,\"nativeSource\":\"\"," +
+                        "\"toolbarPresent\":" + (nativeToolbarPresent ? "true" : "false") +
+                        ",\"toolbarEnabled\":" + (nativeToolbarEnabled ? "true" : "false") +
+                        ",\"toolbarClicked\":" + (nativeToolbarClicked ? "true" : "false") + "}");
                     // Do not ExecuteScriptAsync while YouTube navigates: on
                     // WebView2 this can hang until the smoke process exits.
                     // The native Source is observable even during transitions.
@@ -1163,7 +1921,10 @@ namespace TizenTubeWindows
                     }
                     File.WriteAllText(proofFile,
                         "{\"request\":" + initial + ",\"result\":" + now +
-                        ",\"nativeSource\":" + System.Text.Json.JsonSerializer.Serialize(nativePath) + "}");
+                        ",\"nativeSource\":" + System.Text.Json.JsonSerializer.Serialize(nativePath) +
+                        ",\"toolbarPresent\":" + (nativeToolbarPresent ? "true" : "false") +
+                        ",\"toolbarEnabled\":" + (nativeToolbarEnabled ? "true" : "false") +
+                        ",\"toolbarClicked\":" + (nativeToolbarClicked ? "true" : "false") + "}");
                 }
             }
             catch (Exception ex) { Console.Error.WriteLine("[Host UI Probe] " + ex.Message); }
@@ -1179,16 +1940,22 @@ namespace TizenTubeWindows
             bool restoringFlagSet = false;
             try
             {
-                // DOM-only theater attribute changes collapse the video to
-                // zero size on real YouTube. Wait until the actual player is
-                // ready, reveal the controls, then click ONLY if hit-testing
-                // identifies the native theater button under that coordinate.
-                await Task.Delay(4900);
-                if (IsDisposed || webView?.CoreWebView2 == null || nativeFloatingActive) return;
-                string buttonPoint = await webView.CoreWebView2.ExecuteScriptAsync(
-                    "(() => {const b=document.querySelector('.ytp-size-button');" +
-                    "if(!b)return null;const r=b.getBoundingClientRect();" +
-                    "return {x:r.left+r.width/2,y:r.top+r.height/2};})()");
+                // Avoid a blind 4.9-second wait: restore at the first usable
+                // video frame with a real, hit-tested click. We cannot mutate
+                // 'theater' prematurely; that collapsed the player in E2E.
+                string buttonPoint = "null";
+                for (int check = 0; check < 40; check++)
+                {
+                    if (IsDisposed || webView?.CoreWebView2 == null || nativeFloatingActive) return;
+                    buttonPoint = await webView.CoreWebView2.ExecuteScriptAsync(
+                        "(() => {const b=document.querySelector('.ytp-size-button');" +
+                        "const v=document.querySelector('video.html5-main-video');" +
+                        "if(!b||!v||v.readyState<2||v.videoWidth<1)return null;" +
+                        "const r=b.getBoundingClientRect();" +
+                        "return r.width>5&&r.height>5?{x:r.left+r.width/2,y:r.top+r.height/2}:null;})()");
+                    if (buttonPoint != "null") break;
+                    await Task.Delay(50);
+                }
                 if (buttonPoint == "null") return;
                 double mouseX, mouseY;
                 using (var point = System.Text.Json.JsonDocument.Parse(buttonPoint))
@@ -1202,7 +1969,7 @@ namespace TizenTubeWindows
                     type = "mouseMoved", x = mouseX, y = mouseY });
                 await webView.CoreWebView2.CallDevToolsProtocolMethodAsync(
                     "Input.dispatchMouseEvent", move);
-                await Task.Delay(240);
+                await Task.Delay(60);
                 string coords = await webView.CoreWebView2.ExecuteScriptAsync(
                     "(() => {const b=document.querySelector('.ytp-size-button');" +
                     "const f=document.querySelector('ytd-watch-flexy');" +
@@ -1347,6 +2114,26 @@ namespace TizenTubeWindows
                         return;
                     }
 
+                    if (json.Contains("\"channel\":\"viewing:last-video\""))
+                    {
+                        if (Uri.TryCreate(args.Source, UriKind.Absolute, out Uri sender) &&
+                            sender.Scheme == "https" &&
+                            (sender.Host == "www.youtube.com" || sender.Host == "youtube.com") &&
+                            json.Length < 1000)
+                        {
+                            string tmp = lastVideoSessionFile + ".tmp";
+                            File.WriteAllText(tmp, json);
+                            File.Move(tmp, lastVideoSessionFile, true);
+                        }
+                        return;
+                    }
+
+                    if (json.Contains("\"channel\":\"viewing:clear-last-video\""))
+                    {
+                        try { if (File.Exists(lastVideoSessionFile)) File.Delete(lastVideoSessionFile); } catch { }
+                        return;
+                    }
+
                     // Message dispatching for SponsorBlock skip notifications, memory requests, preferences, etc.
                     if (json.Contains("\"channel\":\"adblock:diagnostic\""))
                     {
@@ -1480,8 +2267,7 @@ namespace TizenTubeWindows
             // Video compositing fix lives in a separate, auditable script.
             await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
                 ReadEmbeddedRequired("TizenTube.FloatingPlayer"));
-            await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
-                ReadEmbeddedRequired("TizenTube.NavigationControls"));
+            // Never inject navigation buttons into youtube.com's own masthead.
             // The owner's explicit theater preference is durable independently
             // of YouTube's own UI resets or localStorage migrations.
             if (File.Exists(theaterPreferenceFile))

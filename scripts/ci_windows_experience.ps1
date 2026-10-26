@@ -89,7 +89,7 @@ try {
     # Exercise the real settings modal -> IPC -> Windows disk pipeline across
     # independent exe launches. Windows runner reboot isn't necessary: a new
     # process proves settings survived beyond process-local JS/session memory.
-    Write-Host 'Checking persisted settings and YouTube masthead Back control...'
+    Write-Host 'Checking persisted settings and native browser Back control...'
     Invoke-Host 'preferences-first-launch' @('--preferences-setup-probe') 30
     $setup = Read-Json 'preferences-setup.json'
     Assert-E2E ($setup -eq $true) 'settings-ui-save-dispatched'
@@ -106,11 +106,20 @@ try {
 
     Invoke-Host 'navigation-back' @('--navigation-back-probe') 30
     $back = Read-Json 'navigation-back.json'
-    Assert-E2E ($back.request.found -and
-        $back.request.pushed -eq '/results' -and
-        ($back.result.current -eq $back.request.original -or
-         $back.nativeSource -eq $back.request.original) -and
-        ($null -eq $back.result -or $back.result.buttonExists)) 'actual-youtube-masthead-back-navigates-spa-history'
+    Assert-E2E ($back.toolbarPresent -and $back.toolbarEnabled -and
+        $back.toolbarClicked -and $back.request.pushed -eq '/results' -and
+        $back.nativeSource -eq $back.request.original) 'native-toolbar-back-navigates-spa-history'
+
+    $toolbarPng = Join-Path $dir 'navigation-toolbar.png'
+    Assert-E2E (Test-Path $toolbarPng) 'native-toolbar-pixel-evidence-generated'
+    Add-Type -AssemblyName System.Drawing
+    $navBitmap = [System.Drawing.Bitmap]::FromFile($toolbarPng)
+    try {
+        Assert-E2E ($navBitmap.Width -ge 120 -and $navBitmap.Height -ge 36) 'native-toolbar-proportions'
+        $background = $navBitmap.GetPixel(92, 2)
+        Assert-E2E ($background.R -lt 85 -and $background.G -lt 85 -and
+            $background.B -lt 85) 'native-toolbar-dark-not-browser-white-tile'
+    } finally { $navBitmap.Dispose() }
 
     # HiDPI font rendering & comment layout probe verification
     Write-Host 'Verifying HiDPI layout, font rendering, and comment styles...'
