@@ -669,10 +669,10 @@ namespace TizenTubeWindows
                     "(() => {const l=window.__TIZENTUBE_LOADER__;" +
                     "if(!l?.initialized)return 'Los módulos todavía no están activos';" +
                     "const s=l.sponsorblock;const a=l.adblock;" +
-                    "return 'SponsorBlock: '+(s?.options?.enabled?'activo':'desactivado')+" +
-                    "'\\nSaltar segmentos automáticamente: '+(s?.options?.autoSkip?'sí':'no')+" +
-                    "'\\nSegmentos del vídeo: '+(s?.currentSegments?.length??0)+" +
-                    "'\\nAdBlock: '+(a?.options?.enabled?'activo':'desactivado');})()");
+                    "return ['SponsorBlock: '+(s?.options?.enabled?'activo':'desactivado')," +
+                    "'Saltar segmentos automáticamente: '+(s?.options?.autoSkip?'sí':'no')," +
+                    "'Segmentos del vídeo: '+(s?.currentSegments?.length??0)," +
+                    "'AdBlock: '+(a?.options?.enabled?'activo':'desactivado')].join(String.fromCharCode(10));})()");
                 string state = System.Text.Json.JsonSerializer.Deserialize<string>(info)
                     ?? "No se pudo leer el estado.";
                 if (MessageBox.Show(state + "\n\n¿Abrir ajustes de protecciones?", "Protecciones TizenTube",
@@ -991,8 +991,7 @@ namespace TizenTubeWindows
             // Its ~8px gap is visible in the user's screenshot. Keep normal
             // resize grips, but consume the whole available surface here.
             if (m.Msg == WmNcCalcSize && m.WParam != IntPtr.Zero &&
-                FormBorderStyle == FormBorderStyle.None &&
-                (WindowState == FormWindowState.Maximized || nativeImmersiveActive))
+                FormBorderStyle == FormBorderStyle.None)
             {
                 m.Result = IntPtr.Zero;
                 return;
