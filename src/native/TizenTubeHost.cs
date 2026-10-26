@@ -202,6 +202,9 @@ namespace TizenTubeWindows
             catch { }
 
             var options = HostOptions.Parse(args);
+            if (args?.Length == 2 && args[0] == "--verify-detached-updater-host")
+                return PortableUpdater.VerifyDetachedUpdaterHost(args[1], Path.Combine(
+                    Path.GetTempPath(), "tizentube-update-smoke-" + Guid.NewGuid().ToString("N")));
             // A detached copy of the same signed-by-source portable executable
             // performs replacement only after the original process exits.
             if (args?.Length == 5 && args[0] == "--apply-update")

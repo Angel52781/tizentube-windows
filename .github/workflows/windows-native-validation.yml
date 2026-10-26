@@ -275,7 +275,12 @@ jobs:
           $exeSha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "TizenTubeHost.exe SHA256=$exeSha" | Set-Content (Join-Path $pkg 'CHECKSUMS.txt')
           "Commit=$env:GITHUB_SHA" | Add-Content (Join-Path $pkg 'CHECKSUMS.txt')
-          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.15.zip'
+          # Check that the full packaged .NET app can run after the updater
+          # copies it outside the original install path; EXE-only broke prior
+          # versions. This is a real process launch, not a static assertion.
+          & (Join-Path $pkg 'TizenTubeHost.exe') --verify-detached-updater-host $pkg
+          if ($LASTEXITCODE -ne 0) { throw 'PORTABLE_UPDATER_DETACHED_HOST_CANNOT_START' }
+          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.16.zip'
           Compress-Archive -Path $pkg -DestinationPath $zip -CompressionLevel Optimal -Force
           if (!(Test-Path $zip)) { throw 'PORTABLE_ZIP_MISSING' }
           $zipSha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -289,7 +294,7 @@ jobs:
         with:
           name: tizentube-windows-x64-portable-preview
           path: |
-            release-out/TizenTube-Windows-x64-v0.1.0-preview.15.zip
+            release-out/TizenTube-Windows-x64-v0.1.0-preview.16.zip
             release-out/SHA256SUMS.txt
             release-out/portable-smoke-evidence.json
             release-out/standalone-exe-smoke-evidence.json

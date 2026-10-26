@@ -16,7 +16,7 @@ namespace TizenTubeWindows
 {
     internal static class PortableUpdater
     {
-        private const int CurrentPreview = 15;
+        private const int CurrentPreview = 16;
         private const string Api = "https://api.github.com/repos/Angel52781/tizentube-windows/releases?per_page=30";
         private const string ZipPrefix = "TizenTube-Windows-x64-v0.1.0-preview.";
         private const string PortableFolder = "TizenTube-Windows-x64";
@@ -121,9 +121,15 @@ namespace TizenTubeWindows
                     // A detached copy must do the swap: Windows locks the
                     // original EXE while it is executing. No shell scripts or
                     // arbitrary network-supplied commands are ever executed.
-                    string helper = Path.Combine(updateDir, "TizenTubeUpdater.exe");
-                    File.Copy(Application.ExecutablePath, helper, true);
-                    var start = new ProcessStartInfo(helper) { UseShellExecute = true };
+                    // An apphost EXE alone is NOT a working .NET application.
+                    // Copy its .NET runtime, DLLs and .runtimeconfig.json too,
+                    // otherwise preview.15's detached updater fails to start.
+                    string helperDirectory = Path.Combine(updateDir, "updater-host");
+                    StageUpdaterHost(installed, helperDirectory);
+                    string helper = Path.Combine(helperDirectory, "TizenTubeHost.exe");
+                    var start = new ProcessStartInfo(helper) {
+                        UseShellExecute = true, WorkingDirectory = helperDirectory
+                    };
                     start.ArgumentList.Add("--apply-update");
                     start.ArgumentList.Add(installed);
                     start.ArgumentList.Add(archive);
@@ -149,6 +155,51 @@ namespace TizenTubeWindows
                 return BitConverter.ToString(sha.ComputeHash(file)).Replace("-", "").ToLowerInvariant();
         }
 
+        private static void StageUpdaterHost(string install, string destination)
+        {
+            if (Directory.Exists(destination))
+                throw new IOException("Update helper staging destination already exists");
+            Directory.CreateDirectory(destination);
+            foreach (var source in Directory.EnumerateFiles(install, "*", SearchOption.AllDirectories))
+            {
+                // Do not follow arbitrary junctions/symlinks that a user
+                // might have placed in the portable application directory.
+                if ((File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0)
+                    throw new InvalidDataException("Refusing updater host filesystem links");
+                string relative = Path.GetRelativePath(install, source);
+                string target = Path.Combine(destination, relative);
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(source, target, false);
+            }
+            if (!File.Exists(Path.Combine(destination, "TizenTubeHost.exe")) ||
+                !File.Exists(Path.Combine(destination, "TizenTubeHost.runtimeconfig.json")))
+                throw new InvalidDataException("Staged updater lacks native executable or runtime configuration");
+        }
+
+        public static int VerifyDetachedUpdaterHost(string installed, string scratch)
+        {
+            try
+            {
+                string target = Path.Combine(scratch, "updater-host");
+                StageUpdaterHost(installed, target);
+                var start = new ProcessStartInfo(Path.Combine(target, "TizenTubeHost.exe")) {
+                    UseShellExecute = false, WorkingDirectory = target
+                };
+                start.ArgumentList.Add("--help");
+                using (var child = Process.Start(start))
+                {
+                    if (child == null || !child.WaitForExit(15000) || child.ExitCode != 0)
+                        throw new InvalidOperationException("Detached updater host failed to boot");
+                }
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("UPDATER_DETACHED_HOST_FAILED: " + ex.Message);
+                return 22;
+            }
+        }
+
         public static int ApplyVerifiedUpdate(string install, string archive, string sha, string parentId)
         {
             string backup = null, stage = null;
@@ -159,7 +210,10 @@ namespace TizenTubeWindows
                     !Regex.IsMatch(sha, "^[0-9a-f]{64}$") ||
                     !int.TryParse(parentId, out int pid)) return 2;
                 if (FileSha256(archive) != sha) return 3;
-                try { Process.GetProcessById(pid).WaitForExit(60_000); }
+                try {
+                    using (var original = Process.GetProcessById(pid))
+                        if (!original.WaitForExit(60_000)) return 6;
+                }
                 catch (ArgumentException) { /* Already closed */ }
                 string parent = Directory.GetParent(Path.GetFullPath(install)).FullName;
                 string nonce = Guid.NewGuid().ToString("N");
@@ -178,8 +232,20 @@ namespace TizenTubeWindows
                     Directory.Move(backup, install);
                     throw;
                 }
-                Process.Start(new ProcessStartInfo(Path.Combine(install, "TizenTubeHost.exe"))
-                    { WorkingDirectory = install, UseShellExecute = true });
+                try
+                {
+                    Process.Start(new ProcessStartInfo(Path.Combine(install, "TizenTubeHost.exe"))
+                        { WorkingDirectory = install, UseShellExecute = true });
+                }
+                catch
+                {
+                    // Process launch can fail after a successful directory
+                    // swap. Keep the previous installation usable.
+                    string failed = Path.Combine(parent, ".tizentube-failed-" + nonce);
+                    Directory.Move(install, failed);
+                    Directory.Move(backup, install);
+                    throw;
+                }
                 // Keep backup as a reversible rollback rather than silently
                 // destroying user's prior installation.
                 return 0;
