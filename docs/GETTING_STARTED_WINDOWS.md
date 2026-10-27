@@ -1,5 +1,12 @@
 # TizenTube Windows — prueba personal (v0.1.0-preview.16)
 
+## Preview.17 — actualización integrada sin navegador
+
+- El botón Actualizar descarga directamente en la aplicación, muestra porcentaje y progreso, verifica SHA-256, cierra la app, sustituye los archivos en la misma ubicación y la reinicia.
+- Ya no depende de que la carpeta del usuario se llame exactamente TizenTube-Windows-x64. Se valida la presencia del ejecutable, su configuración .NET y el archivo identificador de instalación; una carpeta inválida muestra un error explícito sin abrir un enlace.
+- Se verifica en CI de Windows el rechazo de una suma SHA incorrecta y la sustitución en una carpeta portable renombrada con respaldo; la copia auxiliar .NET también se inicia independientemente.
+- La versión publicada debe superar estos controles antes de ofrecerse como nueva pre-release. El reemplazo de una instalación personal real sigue requiriendo validación del usuario.
+
 ## Canal único para nuevas versiones
 
 La única rama de desarrollo permanente es main. Las actualizaciones de la aplicación vienen de GitHub Releases publicadas desde main, no de artefactos temporales de GitHub Actions. Al iniciar TizenTube se comprueban las nuevas Releases y se pide confirmación antes de sustituir la aplicación. También se puede pulsar Actualizar.

@@ -280,7 +280,11 @@ jobs:
           # versions. This is a real process launch, not a static assertion.
           & (Join-Path $pkg 'TizenTubeHost.exe') --verify-detached-updater-host $pkg
           if ($LASTEXITCODE -ne 0) { throw 'PORTABLE_UPDATER_DETACHED_HOST_CANNOT_START' }
-          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.16.zip'
+          # Test transactional replacement in a disposable renamed portable
+          # folder; verifies backup and restoration without touching users.
+          & (Join-Path $pkg 'TizenTubeHost.exe') --verify-in-place-updater
+          if ($LASTEXITCODE -ne 0) { throw 'PORTABLE_IN_PLACE_UPDATE_FAILED' }
+          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.17.zip'
           Compress-Archive -Path $pkg -DestinationPath $zip -CompressionLevel Optimal -Force
           if (!(Test-Path $zip)) { throw 'PORTABLE_ZIP_MISSING' }
           $zipSha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -294,7 +298,7 @@ jobs:
         with:
           name: tizentube-windows-x64-portable-preview
           path: |
-            release-out/TizenTube-Windows-x64-v0.1.0-preview.16.zip
+            release-out/TizenTube-Windows-x64-v0.1.0-preview.17.zip
             release-out/SHA256SUMS.txt
             release-out/portable-smoke-evidence.json
             release-out/standalone-exe-smoke-evidence.json
