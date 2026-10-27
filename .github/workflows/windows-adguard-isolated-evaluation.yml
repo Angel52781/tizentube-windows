@@ -1,0 +1,61 @@
+name: Windows AdGuard MV3 Isolated Evaluation
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/native/TizenTubeHost.cs'
+      - 'scripts/ci_package_adguard_trial.ps1'
+      - '.github/workflows/windows-adguard-isolated-evaluation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  evaluate:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile host and verified AdGuard candidate
+        shell: pwsh
+        run: |
+          python scripts/build_icon.py
+          node scripts/bundle_mods.js
+          dotnet publish src/native/TizenTubeWindows.csproj -c Release -f net8.0-windows -r win-x64 --self-contained false -o adguard-host
+          if ($LASTEXITCODE -ne 0) { throw 'ADGUARD_TEST_HOST_COMPILE_FAILED' }
+          & pwsh -NoProfile -File scripts/ci_package_adguard_trial.ps1 -Destination adguard-host/extensions/adguard-trial
+          if ($LASTEXITCODE -ne 0) { throw 'ADGUARD_TRIAL_VENDOR_VALIDATION_FAILED' }
+      - name: Verify enabled rules in isolated WebView2 profile
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory adguard-evidence -Force | Out-Null
+          $env:TIZENTUBE_TEST_SESSION_DIR = Join-Path $env:RUNNER_TEMP 'tizentube-adguard-isolated'
+          $exe = (Resolve-Path adguard-host/TizenTubeHost.exe).Path
+          $evidence = Join-Path (Get-Location) 'adguard-evidence/effective-rules.json'
+          try {
+            $proc = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -ArgumentList @('--smoke-test','30','--adguard-extension-probe','--telemetry-file',$evidence) -Wait -PassThru
+            if (!(Test-Path $evidence)) { throw 'ADGUARD_TRIAL_NO_EVIDENCE' }
+            $s = (Get-Content $evidence -Raw | ConvertFrom-Json).summary
+            Write-Host "ADGUARD_TRIAL_STATUS=$($s.adguardProbeStatus)"
+            Write-Host "ADGUARD_ENABLED=$($s.adguardExtensionEnabled) RULESETS=$($s.adguardEnabledRulesets) SCRIPTS=$($s.adguardRegisteredScripts)"
+            if ($proc.ExitCode -ne 0 -or $s.adguardExtensionEnabled -ne 1 -or
+                $s.adguardEnabledRulesets -lt 1) { throw 'ADGUARD_MV3_ACTUAL_RULES_NOT_VERIFIED' }
+          } finally {
+            Remove-Item $env:TIZENTUBE_TEST_SESSION_DIR -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item Env:TIZENTUBE_TEST_SESSION_DIR -ErrorAction SilentlyContinue
+          }
+      - name: Preserve metadata-only trial results (no cookies/profile)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-adguard-isolated-evaluation
+          path: adguard-evidence/effective-rules.json
+          retention-days: 14

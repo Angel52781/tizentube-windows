@@ -42,6 +42,7 @@ namespace TizenTubeWindows
         public bool FloatingCycleProbe { get; set; } = false;
         public bool FloatingFixtureProbe { get; set; } = false;
         public bool AdblockExtensionProbe { get; set; } = false;
+        public bool AdguardExtensionProbe { get; set; } = false;
         public bool TheaterUserProbe { get; set; } = false;
         public bool TheaterRestoreProbe { get; set; } = false;
         public bool PreferencesSetupProbe { get; set; } = false;
@@ -145,6 +146,10 @@ namespace TizenTubeWindows
                 else if (arg == "--adblock-extension-probe")
                 {
                     options.AdblockExtensionProbe = true;
+                }
+                else if (arg == "--adguard-extension-probe")
+                {
+                    options.AdguardExtensionProbe = true;
                 }
                 else if (arg == "--theater-user-probe")
                 {
@@ -328,6 +333,10 @@ namespace TizenTubeWindows
         private long adblockStyleObserved = 0;
         private long adblockRuntimeObserved = 0;
         private long ubolExtensionEnabled = 0;
+        private long adguardExtensionEnabled = 0;
+        private long adguardEnabledRulesets = 0;
+        private long adguardRegisteredScripts = 0;
+        private string adguardProbeStatus = "not-attempted";
         private long ubolYoutubeFilteringMode = 0;
         private long ubolBroadHostPermission = 0;
         private string ubolConfigurationStatus = "not-attempted";
@@ -875,8 +884,17 @@ namespace TizenTubeWindows
                 // Install a verified, pinned, locally packaged MV3 extension
                 // before the first page navigates. It belongs ONLY to this
                 // application's WebView2 profile (not Windows/Edge globally).
-                if (!options.UnmodifiedWebViewProbe)
+                if (options.AdguardExtensionProbe)
+                    await InitializeAdGuardProbeAsync();
+                else if (!options.UnmodifiedWebViewProbe)
                     await InitializeOpenSourceAdblockAsync();
+                if (options.AdguardExtensionProbe && (
+                    Interlocked.Read(ref adguardExtensionEnabled) != 1 ||
+                    Interlocked.Read(ref adguardEnabledRulesets) < 1))
+                {
+                    ExitCode = 23;
+                    Console.Error.WriteLine("[AdGuard] INTEGRATION_NOT_VERIFIED: " + adguardProbeStatus);
+                }
                 if (options.AdblockExtensionProbe &&
                     (Interlocked.Read(ref ubolExtensionEnabled) != 1 ||
                      Interlocked.Read(ref ubolYoutubeFilteringMode) != 3 ||
@@ -912,12 +930,16 @@ namespace TizenTubeWindows
                 // uBOL explicitly advises against running two blockers.
                 // Retain limited native URL filters only if uBOL could not
                 // initialize on the current WebView2 runtime.
-                if (!options.UnmodifiedWebViewProbe &&
+                if (!options.UnmodifiedWebViewProbe && !options.AdguardExtensionProbe &&
                     Interlocked.Read(ref ubolExtensionEnabled) != 1)
                     SetupNetworkAdBlocker();
                 if (Interlocked.Read(ref ubolExtensionEnabled) == 1)
                     await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
                         "window.__TT_EXTERNAL_ADBLOCK__='uBlock Origin Lite';");
+                else if (options.AdguardExtensionProbe &&
+                         Interlocked.Read(ref adguardExtensionEnabled) == 1)
+                    await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                        "window.__TT_EXTERNAL_ADBLOCK__='AdGuard isolated trial';");
                 SetupFullscreenHandling();
                 SetupIpcBridge();
                 SetupAdblockDiagnosticMenu();
@@ -1397,6 +1419,101 @@ namespace TizenTubeWindows
             {
                 Controls.Remove(settingsView);
                 settingsView.Dispose();
+            }
+        }
+
+        private async Task InitializeAdGuardProbeAsync()
+        {
+            // Trial ONLY. Production remains on uBOL until independent
+            // evidence shows a safer and more effective alternative.
+            // Protect the real user's profile from experimental installs.
+            if (!options.SmokeTest ||
+                string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(
+                    "TIZENTUBE_TEST_SESSION_DIR")))
+                throw new InvalidOperationException(
+                    "AdGuard probe requires an isolated throwaway test profile");
+            try
+            {
+                string root = Path.Combine(AppContext.BaseDirectory, "extensions", "adguard-trial");
+                string manifest = Path.Combine(root, "manifest.json");
+                if (!File.Exists(manifest))
+                    throw new FileNotFoundException("Pinned AdGuard MV3 trial extension absent");
+                using (var metadata = System.Text.Json.JsonDocument.Parse(File.ReadAllText(manifest)))
+                {
+                    if (metadata.RootElement.GetProperty("version").GetString() != "5.5.3.3" ||
+                        metadata.RootElement.GetProperty("manifest_version").GetInt32() != 3)
+                        throw new InvalidDataException("AdGuard trial manifest/version mismatch");
+                }
+                var extension = await webView.CoreWebView2.Profile.AddBrowserExtensionAsync(root);
+                if (!extension.IsEnabled) await extension.EnableAsync(true);
+                var extensions = await webView.CoreWebView2.Profile.GetBrowserExtensionsAsync();
+                if (!extensions.Any(item => item.Id == extension.Id && item.IsEnabled))
+                    throw new InvalidOperationException("AdGuard not enabled in WebView2");
+                Interlocked.Exchange(ref adguardExtensionEnabled, 1);
+                adguardProbeStatus = "extension-enabled";
+
+                // Inspect actual rules/services, not just extension metadata.
+                var probe = new WebView2 {
+                    Location = new Point(-3, -3), Size = new Size(1, 1), Visible = true
+                };
+                Controls.Add(probe);
+                try
+                {
+                    await probe.EnsureCoreWebView2Async(webView.CoreWebView2.Environment);
+                    string origin = "chrome-extension://" + extension.Id + "/";
+                    var navigation = new TaskCompletionSource<bool>(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    probe.CoreWebView2.NavigationCompleted += (s, e) =>
+                        navigation.TrySetResult(e.IsSuccess);
+                    probe.CoreWebView2.Navigate(origin + "pages/options.html");
+                    if (await Task.WhenAny(navigation.Task, Task.Delay(15000)) != navigation.Task ||
+                        !await navigation.Task ||
+                        !probe.CoreWebView2.Source.StartsWith(origin, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException("AdGuard extension options page not navigable");
+                    string script = @"(() => {
+                      self.__ttAdguardTrial = null;
+                      (async () => {
+                        if (!globalThis.chrome?.declarativeNetRequest?.getEnabledRulesets)
+                          return {error:'WebView2 DNR API unavailable'};
+                        const rulesets = await chrome.declarativeNetRequest.getEnabledRulesets();
+                        const scripts = globalThis.chrome?.scripting?.getRegisteredContentScripts
+                          ? await chrome.scripting.getRegisteredContentScripts() : [];
+                        const permission = globalThis.chrome?.permissions?.contains
+                          ? await chrome.permissions.contains({origins:['<all_urls>']}) : false;
+                        return { rulesets:rulesets.length, scripts:scripts.length, permission };
+                      })().then(result => self.__ttAdguardTrial = result)
+                        .catch(err => self.__ttAdguardTrial = {error:String(err?.message || err).slice(0,150)});
+                      return true;
+                    })()";
+                    await probe.CoreWebView2.ExecuteScriptAsync(script);
+                    string raw = "null";
+                    for (int attempt = 0; attempt < 40; attempt++)
+                    {
+                        await Task.Delay(250);
+                        raw = await probe.CoreWebView2.ExecuteScriptAsync(
+                            "self.__ttAdguardTrial ?? null");
+                        if (raw != "null" && raw != "{}") break;
+                    }
+                    adguardProbeStatus = "effective-rules:" + raw;
+                    using (var detail = System.Text.Json.JsonDocument.Parse(raw))
+                    {
+                        if (detail.RootElement.TryGetProperty("rulesets", out var rulesets))
+                            Interlocked.Exchange(ref adguardEnabledRulesets, rulesets.GetInt32());
+                        if (detail.RootElement.TryGetProperty("scripts", out var scripts))
+                            Interlocked.Exchange(ref adguardRegisteredScripts, scripts.GetInt32());
+                    }
+                    Console.WriteLine("[AdGuard] isolated MV3 evaluation: " + raw);
+                }
+                finally
+                {
+                    Controls.Remove(probe);
+                    probe.Dispose();
+                }
+            }
+            catch (Exception error)
+            {
+                adguardProbeStatus += "|" + error.GetType().Name + ":" + error.Message;
+                Console.Error.WriteLine("[AdGuard] isolated MV3 evaluation failure: " + error.Message);
             }
         }
 
@@ -2613,6 +2730,10 @@ namespace TizenTubeWindows
             sb.AppendLine($"    \"adblockRuntimeObserved\": {Interlocked.Read(ref adblockRuntimeObserved)},");
             sb.AppendLine($"    \"adblockStyleObserved\": {Interlocked.Read(ref adblockStyleObserved)},");
             sb.AppendLine($"    \"ubolExtensionEnabled\": {Interlocked.Read(ref ubolExtensionEnabled)},");
+            sb.AppendLine($"    \"adguardExtensionEnabled\": {Interlocked.Read(ref adguardExtensionEnabled)},");
+            sb.AppendLine($"    \"adguardEnabledRulesets\": {Interlocked.Read(ref adguardEnabledRulesets)},");
+            sb.AppendLine($"    \"adguardRegisteredScripts\": {Interlocked.Read(ref adguardRegisteredScripts)},");
+            sb.AppendLine($"    \"adguardProbeStatus\": \"{EscapeJson(adguardProbeStatus)}\",");
             sb.AppendLine($"    \"ubolYoutubeFilteringMode\": {Interlocked.Read(ref ubolYoutubeFilteringMode)},");
             sb.AppendLine($"    \"ubolBroadHostPermission\": {Interlocked.Read(ref ubolBroadHostPermission)},");
             sb.AppendLine($"    \"ubolConfigurationStatus\": \"{EscapeJson(ubolConfigurationStatus)}\",");
