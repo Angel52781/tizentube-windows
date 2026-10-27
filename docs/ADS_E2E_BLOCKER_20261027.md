@@ -38,10 +38,10 @@ creator-integrated segments in requested content.
   https://github.com/uBlockOrigin/uAssets/issues/30329
   https://github.com/uBlockOrigin/uAssets/issues/33382
 * The original upstream TizenTube implementation
-  \`references/TizenTube/mods/features/adblock.js\` neutralizes ad metadata
-  such as \`adPlacements\`, \`playerAds\` and \`adSlots\` in the TV player JSON.
-  In our desktop port, \`src/mods/adblock_base.js\` intentionally leaves
-  desktop playback responses with \`streamingData\` or \`playabilityStatus\`
+  `references/TizenTube/mods/features/adblock.js` neutralizes ad metadata
+  such as `adPlacements`, `playerAds` and `adSlots` in the TV player JSON.
+  In our desktop port, `src/mods/adblock_base.js` intentionally leaves
+  desktop playback responses with `streamingData` or `playabilityStatus`
   intact to avoid corrupting legitimate video playback. It is also disabled
   as a whole when the embedded uBOL extension is present.
 
