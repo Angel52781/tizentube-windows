@@ -1,0 +1,70 @@
+name: Windows uBOL Effective Filtering Proof
+
+# Small, independent Windows evidence gate. Does not need live YouTube
+# playback and does not upload the browser profile or account data.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/native/TizenTubeHost.cs'
+      - 'src/native/TizenTubeWindows.csproj'
+      - 'scripts/ci_package_ubol.ps1'
+      - '.github/workflows/windows-ubol-mode-proof.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-extension-permissions:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build native Windows host and pin original uBOL
+        shell: pwsh
+        run: |
+          python scripts/build_icon.py
+          node scripts/bundle_mods.js
+          dotnet publish src/native/TizenTubeWindows.csproj -c Release -f net8.0-windows -r win-x64 --self-contained false -o mode-host
+          if ($LASTEXITCODE -ne 0) { throw 'UBOL_HOST_COMPILE_FAILED' }
+          & pwsh -NoProfile -File scripts/ci_package_ubol.ps1 -Destination mode-host/extensions/ubol
+          if ($LASTEXITCODE -ne 0) { throw 'UBOL_PINNED_PACKAGE_FAILED' }
+      - name: Probe actual WebView2 extension rights and Youtube filtering
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory mode-evidence -Force | Out-Null
+          $env:TIZENTUBE_TEST_SESSION_DIR = Join-Path $env:RUNNER_TEMP 'tizentube-isolated-ubol-mode'
+          $exe = (Resolve-Path mode-host/TizenTubeHost.exe).Path
+          $evidence = (Join-Path (Get-Location) 'mode-evidence/host.json')
+          try {
+            $proc = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -ArgumentList @('--smoke-test','24','--adblock-extension-probe','--telemetry-file',$evidence) -Wait -PassThru
+            if (!(Test-Path $evidence)) { throw 'NO_UBOL_RUNTIME_EVIDENCE' }
+            $summary = (Get-Content $evidence -Raw | ConvertFrom-Json).summary
+            Write-Host "UBOL_DIAG: $($summary.ubolConfigurationStatus)"
+            Write-Host "UBOL_ENABLED=$($summary.ubolExtensionEnabled) PERMISSION=$($summary.ubolBroadHostPermission) MODE=$($summary.ubolYoutubeFilteringMode)"
+            if ($proc.ExitCode -ne 0 -or $summary.ubolExtensionEnabled -ne 1 -or
+                $summary.ubolBroadHostPermission -ne 1 -or $summary.ubolYoutubeFilteringMode -ne 3) {
+              throw 'UBOL_YOUTUBE_COMPLETE_FILTERING_NOT_VERIFIED'
+            }
+          } finally {
+            Remove-Item $env:TIZENTUBE_TEST_SESSION_DIR -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item Env:TIZENTUBE_TEST_SESSION_DIR -ErrorAction SilentlyContinue
+          }
+      - name: Upload metadata-only mode proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-ubol-mode-proof
+          path: mode-evidence/host.json
+          if-no-files-found: warn
+          retention-days: 14

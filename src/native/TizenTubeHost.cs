@@ -330,6 +330,7 @@ namespace TizenTubeWindows
         private long ubolExtensionEnabled = 0;
         private long ubolYoutubeFilteringMode = 0;
         private long ubolBroadHostPermission = 0;
+        private string ubolConfigurationStatus = "not-attempted";
         private bool initialAdDiagnosticQueued = false;
         private bool manualImmersiveMode = false;
         private bool webPlayerFullscreen = false;
@@ -880,7 +881,11 @@ namespace TizenTubeWindows
                     (Interlocked.Read(ref ubolExtensionEnabled) != 1 ||
                      Interlocked.Read(ref ubolYoutubeFilteringMode) != 3 ||
                      Interlocked.Read(ref ubolBroadHostPermission) != 1))
-                    throw new InvalidOperationException("UBOL_YOUTUBE_COMPLETE_FILTERING_NOT_VERIFIED");
+                {
+                    ExitCode = 21;
+                    Console.Error.WriteLine("[AdBlock] UBOL_YOUTUBE_COMPLETE_FILTERING_NOT_VERIFIED: " +
+                        ubolConfigurationStatus);
+                }
                 if (options.FloatingFixtureProbe)
                 {
                     // Test-only virtual HTTPS origin, resolved entirely from local files.
@@ -1260,6 +1265,7 @@ namespace TizenTubeWindows
             {
                 if (!File.Exists(manifest))
                 {
+                    ubolConfigurationStatus = "packaged-extension-missing";
                     Console.Error.WriteLine("[AdBlock] Packaged uBlock Origin Lite missing; limited fallback only");
                     return;
                 }
@@ -1286,11 +1292,14 @@ namespace TizenTubeWindows
                 if (!verified.Any(ext => ext.Id == active.Id && ext.IsEnabled))
                     throw new InvalidOperationException("uBOL extension not enabled after installation");
                 Interlocked.Exchange(ref ubolExtensionEnabled, 1);
+                ubolConfigurationStatus = "extension-enabled";
                 await ConfigureYouTubeFilteringAsync(active);
                 Console.WriteLine("[AdBlock] uBlock Origin Lite " + pinnedVersion + " enabled in WebView2 profile");
             }
             catch (Exception error)
             {
+                ubolConfigurationStatus = "configuration-error:" +
+                    error.GetType().Name + ":" + error.Message;
                 Console.Error.WriteLine("[AdBlock] uBOL mode verification failed: " + error.Message);
             }
         }
@@ -1308,12 +1317,14 @@ namespace TizenTubeWindows
             try
             {
                 await settingsView.EnsureCoreWebView2Async(webView.CoreWebView2.Environment);
+                ubolConfigurationStatus = "probe-webview-created";
                 string expected = "chrome-extension://" + extension.Id + "/";
                 var loaded = new TaskCompletionSource<bool>(
                     TaskCreationOptions.RunContinuationsAsynchronously);
                 settingsView.CoreWebView2.NavigationCompleted += (s, e) =>
                     loaded.TrySetResult(e.IsSuccess);
                 settingsView.CoreWebView2.Navigate(expected + "dashboard.html");
+                ubolConfigurationStatus = "extension-page-navigation-started";
                 if (await Task.WhenAny(loaded.Task, Task.Delay(12000)) != loaded.Task ||
                     !await loaded.Task || !settingsView.CoreWebView2.Source.StartsWith(
                         expected, StringComparison.OrdinalIgnoreCase))
@@ -1341,6 +1352,7 @@ namespace TizenTubeWindows
                     return { permitted, before, after, verified };
                 })()";
                 string raw = await settingsView.CoreWebView2.ExecuteScriptAsync(script);
+                ubolConfigurationStatus = "extension-script-result:" + raw;
                 using (var response = System.Text.Json.JsonDocument.Parse(raw))
                 {
                     var result = response.RootElement;
@@ -1358,6 +1370,7 @@ namespace TizenTubeWindows
                     Interlocked.Read(ref ubolYoutubeFilteringMode) != 3)
                     throw new InvalidOperationException(
                         "uBOL lacks complete YouTube filtering or broad host permissions");
+                ubolConfigurationStatus = "youtube-complete-confirmed";
             }
             finally
             {
@@ -2581,6 +2594,7 @@ namespace TizenTubeWindows
             sb.AppendLine($"    \"ubolExtensionEnabled\": {Interlocked.Read(ref ubolExtensionEnabled)},");
             sb.AppendLine($"    \"ubolYoutubeFilteringMode\": {Interlocked.Read(ref ubolYoutubeFilteringMode)},");
             sb.AppendLine($"    \"ubolBroadHostPermission\": {Interlocked.Read(ref ubolBroadHostPermission)},");
+            sb.AppendLine($"    \"ubolConfigurationStatus\": \"{EscapeJson(ubolConfigurationStatus)}\",");
             sb.AppendLine($"    \"windowCyclePass\": {Interlocked.Read(ref windowCyclePass)},");
             sb.AppendLine($"    \"windowFullMonitorPass\": {Interlocked.Read(ref windowFullMonitorPass)},");
             sb.AppendLine($"    \"windowRestorePass\": {Interlocked.Read(ref windowRestorePass)},");
