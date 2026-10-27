@@ -41,7 +41,13 @@ jobs:
           $exe = (Resolve-Path adguard-host/TizenTubeHost.exe).Path
           $evidence = Join-Path (Get-Location) 'adguard-evidence/effective-rules.json'
           try {
-            $proc = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -ArgumentList @('--smoke-test','30','--adguard-extension-probe','--telemetry-file',$evidence) -Wait -PassThru
+            # Start-Process -Wait can also wait for a long-lived WebView2
+            # service-worker process. Bound only the native host PID instead.
+            $proc = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -ArgumentList @('--smoke-test','30','--adguard-extension-probe','--telemetry-file',$evidence) -PassThru
+            if (!$proc.WaitForExit(65000)) {
+              try { $proc.Kill() } catch {}
+              throw 'ADGUARD_TRIAL_HOST_TIMEOUT'
+            }
             if (!(Test-Path $evidence)) { throw 'ADGUARD_TRIAL_NO_EVIDENCE' }
             $s = (Get-Content $evidence -Raw | ConvertFrom-Json).summary
             Write-Host "ADGUARD_TRIAL_STATUS=$($s.adguardProbeStatus)"
