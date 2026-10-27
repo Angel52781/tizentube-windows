@@ -43,6 +43,7 @@ jobs:
         run: |
           npm test
           node scripts/test_native_adblock_extension.js
+          node scripts/test_external_ad_skip_helper.js
           node scripts/test_native_updater.js
           node scripts/test_sponsorblock_real_skip_path.js
           node scripts/test_playback_failopen.js
@@ -295,7 +296,7 @@ jobs:
           # folder; verifies backup and restoration without touching users.
           & (Join-Path $pkg 'TizenTubeHost.exe') --verify-in-place-updater
           if ($LASTEXITCODE -ne 0) { throw 'PORTABLE_IN_PLACE_UPDATE_FAILED' }
-          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.18.zip'
+          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.19.zip'
           Compress-Archive -Path $pkg -DestinationPath $zip -CompressionLevel Optimal -Force
           if (!(Test-Path $zip)) { throw 'PORTABLE_ZIP_MISSING' }
           $zipSha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -309,7 +310,7 @@ jobs:
         with:
           name: tizentube-windows-x64-portable-preview
           path: |
-            release-out/TizenTube-Windows-x64-v0.1.0-preview.18.zip
+            release-out/TizenTube-Windows-x64-v0.1.0-preview.19.zip
             release-out/SHA256SUMS.txt
             release-out/portable-smoke-evidence.json
             release-out/standalone-exe-smoke-evidence.json

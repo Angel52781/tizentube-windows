@@ -8,7 +8,7 @@ const toolbar = fs.readFileSync('src/native/NavigationToolbar.cs', 'utf8');
 const project = fs.readFileSync('src/native/TizenTubeWindows.csproj', 'utf8');
 const ci = fs.readFileSync('.github/workflows/windows-native-validation.yml', 'utf8');
 const loader = fs.readFileSync('src/mods/mod_loader.js', 'utf8');
-const preview = '0.1.0-preview.18';
+const preview = '0.1.0-preview.19';
 
 assert.ok(project.includes('<Version>' + preview + '</Version>'));
 assert.ok(ci.includes('TizenTube-Windows-x64-v' + preview + '.zip'));

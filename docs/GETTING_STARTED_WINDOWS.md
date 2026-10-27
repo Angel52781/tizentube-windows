@@ -1,4 +1,29 @@
-# TizenTube Windows — prueba personal (v0.1.0-preview.18)
+# TizenTube Windows — prueba personal (v0.1.0-preview.19)
+
+## Preview.19 — anuncios residuales (problema aún abierto)
+
+uBlock Origin Lite sigue siendo el único motor de bloqueo de red, con las
+limitaciones de Manifest V3 que documenta su autor. La extensión instalada y
+habilitada **no equivale** a bloqueo perfecto en YouTube ni demuestra que su
+modo de filtrado y permisos sean adecuados para todos los casos.
+
+La preview.18 desactivaba también la ayuda para pulsar el botón nativo
+`Saltar anuncio` al detectar uBlock Origin Lite. Preview.19 recupera solo
+esta ayuda independiente: si YouTube está mostrando un anuncio y aparece
+un botón de salto visible y habilitado, TizenTube lo pulsa automáticamente.
+Nunca manipula `currentTime`, `playbackRate` o `muted` para finalizar
+un anuncio no saltable. No cuenta los intentos de pulsación como anuncios
+bloqueados con éxito.
+
+En **Protecciones** se informa del estado del reproductor publicitario,
+disponibilidad del botón de salto, intentos de salto y estado del motor de
+filtrado. No se recogen cookies, nombres de cuenta ni contenido de vídeos.
+
+Pruebas: cubierta la detección de anuncios, ausencia de pulsaciones durante
+vídeo normal, botón oculto/deshabilitado, prevención de pulsaciones repetidas,
+preferencias y limpieza del observador. La supresión de anuncios no saltables
+y la eficacia real del modo de filtrado de uBlock Lite continúan pendientes
+de verificación en una sesión de YouTube.
 
 ## Preview.18 — bloqueo de anuncios y SponsorBlock
 

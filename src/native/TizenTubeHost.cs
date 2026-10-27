@@ -700,6 +700,8 @@ namespace TizenTubeWindows
                     "if(!l?.initialized)return 'Los módulos todavía no están activos';" +
                     "const s=l.sponsorblock;const a=l.adblock;" +
                     "const st=s?.getStats?.()||{};const v=l.playback?.videoElement;" +
+                    "const player=document.querySelector?.('.html5-video-player.ad-showing, #movie_player.ad-showing');" +
+                    "const skip=document.querySelector?.('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .ytp-skip-ad-button-modern, .videoAdUiSkipButton, .ytp-ad-skip-button-container button');" +
                     "const labels={no_video:'sin vídeo detectado',loading:'consultando API'," +
                     "segments_found:'segmentos recibidos',no_segments:'sin segmentos registrados'," +
                     "network_error:'fallo al consultar API',rate_limited:'API con límite de solicitudes'," +
@@ -711,7 +713,11 @@ namespace TizenTubeWindows
                     "'Consulta: '+(labels[st.lastFetchStatus]||'desconocida')," +
                     "'Segmentos del vídeo: '+(st.segmentCount??0)," +
                     "'Saltos realizados: '+(st.skipCount??0)," +
-                    "'AdBlock: '+(a?.options?.enabled?'activo':'desactivado')].join(String.fromCharCode(10));})()");
+                    "'Publicidad en reproducción: '+(player?'sí':'no')," +
+                    "'Botón Saltar anuncio: '+(skip?'detectado':'no disponible')," +
+                    "'Intentos de salto de anuncios: '+(a?.adSkipAttempts??0)," +
+                    "'Ayuda para anuncios saltables: '+(a?._externalAdSkipOnly?'activa':'modo clásico')," +
+                    "'Filtros AdBlock clásicos: '+(a?.options?.enabled?'activos':'desactivados')].join(String.fromCharCode(10));})()");
                 string state = System.Text.Json.JsonSerializer.Deserialize<string>(info)
                     ?? "No se pudo leer el estado.";
                 string nativeBlocker = Interlocked.Read(ref ubolExtensionEnabled) == 1

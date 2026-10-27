@@ -13,7 +13,7 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <Nullable>disable</Nullable>
     <Deterministic>true</Deterministic>
-    <Version>0.1.0-preview.18</Version>
+    <Version>0.1.0-preview.19</Version>
     <Authors>TizenTube Windows Contributors</Authors>
     <Company>TizenTube Windows Contributors</Company>
     <Product>TizenTube Windows</Product>

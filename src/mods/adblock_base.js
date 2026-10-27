@@ -33,6 +33,10 @@ export class AdBlockBase {
     this.sponsoredObserver = null;
     this._sponsoredScanScheduled = false;
     this._diagnosticKeyHandler = null;
+    this._externalAdSkipOnly = false;
+    this._adSkipPoll = null;
+    this._lastAdSkipAttemptAt = 0;
+    this.adSkipAttempts = 0;
   }
 
   /**
@@ -45,6 +49,11 @@ export class AdBlockBase {
     // can break the player and uBOL explicitly discourages such mixtures.
     if (typeof window !== 'undefined' && window.__TT_EXTERNAL_ADBLOCK__) {
       this.options.enabled = false;
+      // MV3 rules occasionally miss an ad. Preserve ONLY the native
+      // YouTube "Skip Ad" button helper; never add another request filter,
+      // JSON interception or cosmetic rules alongside uBOL.
+      this._externalAdSkipOnly = true;
+      if (typeof document !== 'undefined') this.attachExternalAdSkip();
       return;
     }
     if (!this.options.enabled || this.isHooked) return;
@@ -80,6 +89,8 @@ export class AdBlockBase {
   setEnabled(enabled) {
     if (typeof window !== 'undefined' && window.__TT_EXTERNAL_ADBLOCK__) {
       this.options.enabled = false;
+      this._externalAdSkipOnly = true;
+      this.options.autoSkipVideoAds = Boolean(this.options.autoSkipVideoAds);
       return;
     }
     this.options.enabled = Boolean(enabled);
@@ -93,6 +104,19 @@ export class AdBlockBase {
       } else {
         this.attachDocumentFilters();
       }
+    }
+  }
+
+  attachExternalAdSkip() {
+    if (typeof document === 'undefined') return;
+    if (document.body) {
+      this.startAutoSkipObserver();
+    } else if (!this._domReadyListener && typeof document.addEventListener === 'function') {
+      this._domReadyListener = () => {
+        this._domReadyListener = null;
+        if (this._externalAdSkipOnly) this.attachExternalAdSkip();
+      };
+      document.addEventListener('DOMContentLoaded', this._domReadyListener, { once: true });
     }
   }
 
@@ -610,7 +634,16 @@ export class AdBlockBase {
 
     const trySkip = () => {
       this._skipScheduled = false;
-      if (!this.options.enabled || !this.options.autoSkipVideoAds) return;
+      if (!(this.options.enabled || this._externalAdSkipOnly)
+          || !this.options.autoSkipVideoAds) return;
+
+      // A control might exist in the player DOM while a normal video is
+      // playing; do not click unrelated or hidden controls. Never fast-forward
+      // or change playbackRate/mute in response to this flag.
+      const adPlayer = document.querySelector?.(
+        '.html5-video-player.ad-showing, #movie_player.ad-showing'
+      );
+      if (!adPlayer) return;
 
       // 1. Detect and click skip buttons
       const skipSelectors = [
@@ -629,9 +662,13 @@ export class AdBlockBase {
 
       for (const sel of skipSelectors) {
         const btn = document.querySelector(sel);
-        if (btn && typeof btn.click === 'function') {
+        if (btn && typeof btn.click === 'function' && !btn.disabled &&
+            btn.getAttribute?.('aria-disabled') !== 'true' &&
+            (typeof btn.getClientRects !== 'function' || btn.getClientRects().length > 0) &&
+            Date.now() - this._lastAdSkipAttemptAt >= 1000) {
           btn.click();
-          this.blockedCount++;
+          this._lastAdSkipAttemptAt = Date.now();
+          this.adSkipAttempts++;
           break;
         }
       }
@@ -658,6 +695,14 @@ export class AdBlockBase {
     const target = document.body || document.documentElement;
     if (target) {
       this.skipObserver.observe(target, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+      // Some ads enable an already-rendered Skip button on a timer without
+      // modifying class names. Poll ONLY while the fallback skip helper is
+      // installed, at low frequency. This does not duplicate uBOL filtering.
+      if (!this._adSkipPoll && this._externalAdSkipOnly) {
+        this._adSkipPoll = setInterval(trySkip, 900);
+        this._adSkipPoll?.unref?.();
+      }
+      trySkip();
     }
   }
 
@@ -665,6 +710,10 @@ export class AdBlockBase {
    * Stops auto-skip observer.
    */
   stopAutoSkipObserver() {
+    if (this._adSkipPoll) {
+      clearInterval(this._adSkipPoll);
+      this._adSkipPoll = null;
+    }
     if (this.skipObserver) {
       this.skipObserver.disconnect();
       this.skipObserver = null;
@@ -676,6 +725,7 @@ export class AdBlockBase {
    * Disposes adblock resources and restores global hooks.
    */
   dispose() {
+    this._externalAdSkipOnly = false;
     if (this._diagnosticKeyHandler && typeof window !== 'undefined') {
       window.removeEventListener?.('keydown', this._diagnosticKeyHandler, true);
       this._diagnosticKeyHandler = null;
@@ -706,6 +756,8 @@ export class AdBlockBase {
     return {
       enabled: this.options.enabled,
       blockedCount: this.blockedCount,
+      adSkipAttempts: this.adSkipAttempts,
+      externalAdSkipOnly: this._externalAdSkipOnly,
       adVideoSpeedupCount: this.adVideoSpeedupCount,
       isHooked: this.isHooked
     };
