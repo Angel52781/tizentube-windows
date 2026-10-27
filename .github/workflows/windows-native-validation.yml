@@ -196,11 +196,17 @@ jobs:
           $smoke = Get-Content $smokePath -Raw -Encoding utf8 | ConvertFrom-Json
           if ($smoke.summary.modsInitializedCount -lt 1) { throw 'PORTABLE_MODS_NOT_RUNNING' }
           if ($smoke.summary.ubolExtensionEnabled -lt 1) { throw 'PORTABLE_UBOL_BROWSER_EXTENSION_NOT_ENABLED' }
+          if ($smoke.summary.ubolYoutubeFilteringMode -ne 3 -or $smoke.summary.ubolBroadHostPermission -ne 1) {
+            throw 'PORTABLE_UBOL_YOUTUBE_COMPLETE_FILTERING_NOT_VERIFIED'
+          }
           $addonEvidence = Join-Path (Resolve-Path $pkg).Path 'extension-enabled-evidence.json'
           $addonProbe = Start-Process -FilePath (Resolve-Path $exe).Path -WorkingDirectory (Resolve-Path $pkg).Path -ArgumentList @('--smoke-test','12','--adblock-extension-probe','--telemetry-file',$addonEvidence) -Wait -PassThru
           if ($addonProbe.ExitCode -ne 0 -or !(Test-Path $addonEvidence)) { throw 'UBOL_WEBVIEW2_EXTENSION_PROBE_FAILED' }
           $addon = Get-Content $addonEvidence -Raw -Encoding utf8 | ConvertFrom-Json
           if ($addon.summary.ubolExtensionEnabled -ne 1) { throw 'UBOL_WEBVIEW2_INSTALLATION_NOT_ATTESTED' }
+          if ($addon.summary.ubolYoutubeFilteringMode -ne 3 -or $addon.summary.ubolBroadHostPermission -ne 1) {
+            throw 'UBOL_WEBVIEW2_HOST_PERMISSIONS_AND_MODE_NOT_VERIFIED'
+          }
           Copy-Item $addonEvidence 'release-out/extension-enabled-evidence.json' -Force
           Copy-Item $smokePath 'release-out/portable-smoke-evidence.json' -Force
           Remove-Item $smokePath -Force
@@ -296,7 +302,7 @@ jobs:
           # folder; verifies backup and restoration without touching users.
           & (Join-Path $pkg 'TizenTubeHost.exe') --verify-in-place-updater
           if ($LASTEXITCODE -ne 0) { throw 'PORTABLE_IN_PLACE_UPDATE_FAILED' }
-          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.19.zip'
+          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.20.zip'
           Compress-Archive -Path $pkg -DestinationPath $zip -CompressionLevel Optimal -Force
           if (!(Test-Path $zip)) { throw 'PORTABLE_ZIP_MISSING' }
           $zipSha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -310,7 +316,7 @@ jobs:
         with:
           name: tizentube-windows-x64-portable-preview
           path: |
-            release-out/TizenTube-Windows-x64-v0.1.0-preview.19.zip
+            release-out/TizenTube-Windows-x64-v0.1.0-preview.20.zip
             release-out/SHA256SUMS.txt
             release-out/portable-smoke-evidence.json
             release-out/standalone-exe-smoke-evidence.json

@@ -328,6 +328,8 @@ namespace TizenTubeWindows
         private long adblockStyleObserved = 0;
         private long adblockRuntimeObserved = 0;
         private long ubolExtensionEnabled = 0;
+        private long ubolYoutubeFilteringMode = 0;
+        private long ubolBroadHostPermission = 0;
         private bool initialAdDiagnosticQueued = false;
         private bool manualImmersiveMode = false;
         private bool webPlayerFullscreen = false;
@@ -721,7 +723,15 @@ namespace TizenTubeWindows
                 string state = System.Text.Json.JsonSerializer.Deserialize<string>(info)
                     ?? "No se pudo leer el estado.";
                 string nativeBlocker = Interlocked.Read(ref ubolExtensionEnabled) == 1
-                    ? "uBlock Origin Lite: habilitado en WebView2\n"
+                    ? "uBlock Origin Lite: habilitado en WebView2\n" +
+                      "Filtrado YouTube: " +
+                      (Interlocked.Read(ref ubolYoutubeFilteringMode) == 3 ? "Completo, verificado" :
+                       Interlocked.Read(ref ubolYoutubeFilteringMode) == 2 ? "Óptimo, no completo" :
+                       Interlocked.Read(ref ubolYoutubeFilteringMode) == 1 ? "Básico, insuficiente" :
+                       "NO VERIFICADO") + "\n" +
+                      "Permisos extensión: " +
+                      (Interlocked.Read(ref ubolBroadHostPermission) == 1
+                        ? "concedidos" : "NO VERIFICADOS") + "\n"
                     : "uBlock Origin Lite: no disponible (filtros limitados de respaldo)\n";
                 if (MessageBox.Show(nativeBlocker + state + "\n\n¿Abrir ajustes de protecciones?", "Protecciones TizenTube",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
@@ -860,8 +870,10 @@ namespace TizenTubeWindows
                 if (!options.UnmodifiedWebViewProbe)
                     await InitializeOpenSourceAdblockAsync();
                 if (options.AdblockExtensionProbe &&
-                    Interlocked.Read(ref ubolExtensionEnabled) != 1)
-                    throw new InvalidOperationException("UBOL_BROWSER_EXTENSION_NOT_ENABLED");
+                    (Interlocked.Read(ref ubolExtensionEnabled) != 1 ||
+                     Interlocked.Read(ref ubolYoutubeFilteringMode) != 3 ||
+                     Interlocked.Read(ref ubolBroadHostPermission) != 1))
+                    throw new InvalidOperationException("UBOL_YOUTUBE_COMPLETE_FILTERING_NOT_VERIFIED");
                 if (options.FloatingFixtureProbe)
                 {
                     // Test-only virtual HTTPS origin, resolved entirely from local files.
@@ -1267,12 +1279,83 @@ namespace TizenTubeWindows
                 if (!verified.Any(ext => ext.Id == active.Id && ext.IsEnabled))
                     throw new InvalidOperationException("uBOL extension not enabled after installation");
                 Interlocked.Exchange(ref ubolExtensionEnabled, 1);
+                await ConfigureYouTubeFilteringAsync(active);
                 Console.WriteLine("[AdBlock] uBlock Origin Lite " + pinnedVersion + " enabled in WebView2 profile");
             }
             catch (Exception error)
             {
-                Interlocked.Exchange(ref ubolExtensionEnabled, 0);
-                Console.Error.WriteLine("[AdBlock] uBOL failed; limited fallback: " + error.Message);
+                Console.Error.WriteLine("[AdBlock] uBOL mode verification failed: " + error.Message);
+            }
+        }
+
+        private async Task ConfigureYouTubeFilteringAsync(CoreWebView2BrowserExtension extension)
+        {
+            // Read and configure the *actual* extension profile through its
+            // own chrome-extension:// origin, before navigating to YouTube.
+            // Merely seeing IsEnabled=true never proves rules/scriptlets work.
+            var settingsView = new WebView2 {
+                Location = new Point(-3, -3), Size = new Size(1, 1),
+                Visible = true
+            };
+            Controls.Add(settingsView);
+            try
+            {
+                await settingsView.EnsureCoreWebView2Async(webView.CoreWebView2.Environment);
+                string expected = "chrome-extension://" + extension.Id + "/";
+                var loaded = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                settingsView.CoreWebView2.NavigationCompleted += (s, e) =>
+                    loaded.TrySetResult(e.IsSuccess);
+                settingsView.CoreWebView2.Navigate(expected + "dashboard.html");
+                if (await Task.WhenAny(loaded.Task, Task.Delay(12000)) != loaded.Task ||
+                    !await loaded.Task || !settingsView.CoreWebView2.Source.StartsWith(
+                        expected, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("uBOL extension configuration page unavailable");
+
+                // uBOL's pinned, source-audited message API updates content
+                // scripts and DNR registration. Do not mutate its storage
+                // directly or install another blocker. Set Complete for
+                // youtube.com only, preserving filtering on other websites.
+                string script = @"(async () => {
+                    if (location.protocol !== 'chrome-extension:' ||
+                        !globalThis.chrome?.runtime?.sendMessage ||
+                        !globalThis.chrome?.permissions?.contains)
+                        return { error: 'extension API unavailable' };
+                    const permitted = await chrome.permissions.contains(
+                        { origins: ['<all_urls>'] });
+                    const before = await chrome.runtime.sendMessage({
+                        what: 'getFilteringMode', hostname: 'youtube.com' });
+                    const after = permitted && before !== 3
+                        ? await chrome.runtime.sendMessage({
+                            what: 'setFilteringMode', hostname: 'youtube.com', level: 3 })
+                        : before;
+                    const verified = await chrome.runtime.sendMessage({
+                        what: 'getFilteringMode', hostname: 'youtube.com' });
+                    return { permitted, before, after, verified };
+                })()";
+                string raw = await settingsView.CoreWebView2.ExecuteScriptAsync(script);
+                using (var response = System.Text.Json.JsonDocument.Parse(raw))
+                {
+                    var result = response.RootElement;
+                    if (result.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                        result.TryGetProperty("permitted", out var permission) &&
+                        permission.ValueKind == System.Text.Json.JsonValueKind.True)
+                        Interlocked.Exchange(ref ubolBroadHostPermission, 1);
+                    if (result.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                        result.TryGetProperty("verified", out var mode) &&
+                        mode.TryGetInt32(out var level))
+                        Interlocked.Exchange(ref ubolYoutubeFilteringMode, level);
+                    Console.WriteLine("[AdBlock] youtube.com uBOL filtering: " + raw);
+                }
+                if (Interlocked.Read(ref ubolBroadHostPermission) != 1 ||
+                    Interlocked.Read(ref ubolYoutubeFilteringMode) != 3)
+                    throw new InvalidOperationException(
+                        "uBOL lacks complete YouTube filtering or broad host permissions");
+            }
+            finally
+            {
+                Controls.Remove(settingsView);
+                settingsView.Dispose();
             }
         }
 
@@ -2489,6 +2572,8 @@ namespace TizenTubeWindows
             sb.AppendLine($"    \"adblockRuntimeObserved\": {Interlocked.Read(ref adblockRuntimeObserved)},");
             sb.AppendLine($"    \"adblockStyleObserved\": {Interlocked.Read(ref adblockStyleObserved)},");
             sb.AppendLine($"    \"ubolExtensionEnabled\": {Interlocked.Read(ref ubolExtensionEnabled)},");
+            sb.AppendLine($"    \"ubolYoutubeFilteringMode\": {Interlocked.Read(ref ubolYoutubeFilteringMode)},");
+            sb.AppendLine($"    \"ubolBroadHostPermission\": {Interlocked.Read(ref ubolBroadHostPermission)},");
             sb.AppendLine($"    \"windowCyclePass\": {Interlocked.Read(ref windowCyclePass)},");
             sb.AppendLine($"    \"windowFullMonitorPass\": {Interlocked.Read(ref windowFullMonitorPass)},");
             sb.AppendLine($"    \"windowRestorePass\": {Interlocked.Read(ref windowRestorePass)},");

@@ -1,4 +1,29 @@
-# TizenTube Windows — prueba personal (v0.1.0-preview.19)
+# TizenTube Windows — prueba personal (v0.1.0-preview.20)
+
+## Preview.20 — diagnóstico real del nivel de uBlock Lite
+
+El anuncio preroll de BBVA mostrado al entrar a YouTube con preview.19
+confirma que las versiones anteriores no eliminan toda la publicidad.
+Se identificó un error de criterio de aceptación: se consideraba suficiente
+que la extensión MV3 estuviera instalada y habilitada. uBlock Lite permite
+filtrado \`none=0\`, \`basic=1\`, \`optimal=2\`, \`complete=3\`, según los
+permisos y la configuración del perfil.
+
+Al iniciar, TizenTube verifica los permisos de acceso a sitios directamente
+en el origen \`chrome-extension://\` de la extensión instalada. A continuación,
+usa el mensaje propio de uBlock Lite \`setFilteringMode\` para seleccionar
+\`Complete\` para \`youtube.com\` y vuelve a consultar \`getFilteringMode\`.
+No modifica el modo predeterminado del resto de sitios ni guarda cookies.
+Esto puede aumentar el filtrado cosmético en YouTube y el uso de recursos.
+
+El gate de CI exige comprobar de forma independiente que el permiso del
+perfil esté concedido y que \`youtube.com\` reporte modo 3. Si WebView2
+no permite verificarlo, la versión no debe declararse funcional. El botón
+\`Protecciones\` distingue «extensión habilitada» de «modo completo comprobado».
+
+**Límite:** incluso modo Complete no prueba eliminación del anuncio BBVA.
+La validación definitiva exige reproducir ese preroll en una sesión real
+de YouTube y comprobar que el vídeo original sigue funcionando.
 
 ## Preview.19 — anuncios residuales (problema aún abierto)
 
