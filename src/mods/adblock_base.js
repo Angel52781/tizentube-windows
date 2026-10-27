@@ -39,6 +39,14 @@ export class AdBlockBase {
    * Initializes JSON.parse and fetch/XHR hooks for YouTube responses.
    */
   install() {
+    // The native host owns uBlock Origin Lite when its MV3 extension is
+    // installed successfully. Do not run a second content blocker in the
+    // same YouTube document: duplicated JSON/network/cosmetic interception
+    // can break the player and uBOL explicitly discourages such mixtures.
+    if (typeof window !== 'undefined' && window.__TT_EXTERNAL_ADBLOCK__) {
+      this.options.enabled = false;
+      return;
+    }
     if (!this.options.enabled || this.isHooked) return;
     this.hookJsonParser();
     this.hookTvInlinePlayback();
@@ -70,6 +78,10 @@ export class AdBlockBase {
    * @param {boolean} enabled 
    */
   setEnabled(enabled) {
+    if (typeof window !== 'undefined' && window.__TT_EXTERNAL_ADBLOCK__) {
+      this.options.enabled = false;
+      return;
+    }
     this.options.enabled = Boolean(enabled);
     if (!this.options.enabled) {
       this.removeCosmeticStyles();

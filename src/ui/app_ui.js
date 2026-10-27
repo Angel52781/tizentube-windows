@@ -176,9 +176,15 @@ export class AppUI {
       this.playback.on('timeupdate', ({ currentTime, duration }) => {
         // Evaluate SponsorBlock skip
         if (this.sponsorblock) {
-          const skipTarget = this.sponsorblock.checkSkip(currentTime);
-          if (skipTarget !== null) {
-            this.handleSponsorBlockSkip(this.sponsorblock.lastSkipped || { targetTime: skipTarget });
+          const visible = typeof document !== 'undefined'
+            ? document.querySelector?.('video.html5-main-video') : null;
+          const adPlaying = typeof document !== 'undefined'
+            ? Boolean(document.querySelector?.('.html5-video-player.ad-showing, #movie_player.ad-showing')) : false;
+          if (!adPlaying && (!visible || visible === this.playback.videoElement)) {
+            const skipTarget = this.sponsorblock.checkSkip(currentTime);
+            if (skipTarget !== null) {
+              this.handleSponsorBlockSkip(this.sponsorblock.lastSkipped || { targetTime: skipTarget });
+            }
           }
         }
 

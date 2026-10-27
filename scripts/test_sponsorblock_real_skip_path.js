@@ -10,6 +10,7 @@ const previousDocument = globalThis.document;
 const previousFetch = globalThis.fetch;
 const listeners = new Map();
 const video = { currentTime: 1, readyState: 4 };
+let visibleVideo = video;
 let calls = 0, skipNotices = 0;
 let loader;
 try {
@@ -20,7 +21,7 @@ try {
   };
   globalThis.document = {
     body: null, querySelector: selector =>
-      selector === 'video.html5-main-video' ? video : null
+      selector === 'video.html5-main-video' ? visibleVideo : null
   };
   globalThis.fetch = async url => {
     calls++;
@@ -81,7 +82,19 @@ try {
   loader._fallbackVideoHandler();
   assert.equal(skipNotices, 1, 'Repeated timer must not skip same UUID twice');
   assert.equal(calls, 1, 'No duplicate fetch on unchanged video');
-  console.log('SponsorBlock SPA navigation, API, seek and deduplication: 6/6 PASS');
+
+  // YouTube replaces the <video> node without changing its current URL.
+  // The old element must never receive the current segment's seek.
+  const nextVideo = { currentTime: 1, readyState: 4 };
+  visibleVideo = nextVideo;
+  loader.sponsorblock.resetSegmentSkip('sponsor-test-uuid');
+  loader.playback.bindVideoElement = node => { loader.playback.videoElement = node; };
+  loader.playback.seekTo = time => { loader.playback.videoElement.currentTime = time; };
+  loader._fallbackVideoHandler();
+  assert.equal(loader.playback.videoElement, nextVideo);
+  assert.equal(nextVideo.currentTime, 2.811777);
+  assert.equal(video.currentTime, 2.811777, 'prior video unchanged after replacement');
+  console.log('SponsorBlock SPA navigation, API, active video rebind, seek and deduplication: 9/9 PASS');
 } finally {
   if (loader?._fallbackVideoTimer) clearInterval(loader._fallbackVideoTimer);
   if (loader?._mountRetryTimer) clearTimeout(loader._mountRetryTimer);

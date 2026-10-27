@@ -13,6 +13,7 @@ using System.Windows.Forms;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -40,6 +41,7 @@ namespace TizenTubeWindows
         public bool FloatingVisualProbe { get; set; } = false;
         public bool FloatingCycleProbe { get; set; } = false;
         public bool FloatingFixtureProbe { get; set; } = false;
+        public bool AdblockExtensionProbe { get; set; } = false;
         public bool TheaterUserProbe { get; set; } = false;
         public bool TheaterRestoreProbe { get; set; } = false;
         public bool PreferencesSetupProbe { get; set; } = false;
@@ -139,6 +141,10 @@ namespace TizenTubeWindows
                 {
                     options.FloatingFixtureProbe = true;
                     options.FloatingCycleProbe = true;
+                }
+                else if (arg == "--adblock-extension-probe")
+                {
+                    options.AdblockExtensionProbe = true;
                 }
                 else if (arg == "--theater-user-probe")
                 {
@@ -321,6 +327,7 @@ namespace TizenTubeWindows
         // reaches a loaded WebView2 DOM (not merely bundled at compile time).
         private long adblockStyleObserved = 0;
         private long adblockRuntimeObserved = 0;
+        private long ubolExtensionEnabled = 0;
         private bool initialAdDiagnosticQueued = false;
         private bool manualImmersiveMode = false;
         private bool webPlayerFullscreen = false;
@@ -707,7 +714,10 @@ namespace TizenTubeWindows
                     "'AdBlock: '+(a?.options?.enabled?'activo':'desactivado')].join(String.fromCharCode(10));})()");
                 string state = System.Text.Json.JsonSerializer.Deserialize<string>(info)
                     ?? "No se pudo leer el estado.";
-                if (MessageBox.Show(state + "\n\n¿Abrir ajustes de protecciones?", "Protecciones TizenTube",
+                string nativeBlocker = Interlocked.Read(ref ubolExtensionEnabled) == 1
+                    ? "uBlock Origin Lite: habilitado en WebView2\n"
+                    : "uBlock Origin Lite: no disponible (filtros limitados de respaldo)\n";
+                if (MessageBox.Show(nativeBlocker + state + "\n\n¿Abrir ajustes de protecciones?", "Protecciones TizenTube",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Information) == DialogResult.Yes)
                     await webView.CoreWebView2.ExecuteScriptAsync(
                         "window.__TIZENTUBE_LOADER__?.ui?.settingsModal?.open?.();");
@@ -830,12 +840,22 @@ namespace TizenTubeWindows
                 // no production WebView profile, no mod injections/filters.
                 var envOptions = options.UnmodifiedWebViewProbe
                     ? new CoreWebView2EnvironmentOptions()
-                    : new CoreWebView2EnvironmentOptions(chromiumArgs);
+                    : new CoreWebView2EnvironmentOptions(chromiumArgs) {
+                        AreBrowserExtensionsEnabled = true
+                    };
                 var browserProfile = options.UnmodifiedWebViewProbe
                     ? Path.Combine(appDataDir, "diagnostic-unmodified")
                     : appDataDir;
                 var env = await CoreWebView2Environment.CreateAsync(null, browserProfile, envOptions);
                 await webView.EnsureCoreWebView2Async(env);
+                // Install a verified, pinned, locally packaged MV3 extension
+                // before the first page navigates. It belongs ONLY to this
+                // application's WebView2 profile (not Windows/Edge globally).
+                if (!options.UnmodifiedWebViewProbe)
+                    await InitializeOpenSourceAdblockAsync();
+                if (options.AdblockExtensionProbe &&
+                    Interlocked.Read(ref ubolExtensionEnabled) != 1)
+                    throw new InvalidOperationException("UBOL_BROWSER_EXTENSION_NOT_ENABLED");
                 if (options.FloatingFixtureProbe)
                 {
                     // Test-only virtual HTTPS origin, resolved entirely from local files.
@@ -859,7 +879,15 @@ namespace TizenTubeWindows
                 // Diagnostic-only unmodified WebView2 isolates whether native
                 // YouTube's playback fails without any of our interception.
                 // Not an undocumented production fallback or a bypass of login.
-                if (!options.UnmodifiedWebViewProbe) SetupNetworkAdBlocker();
+                // uBOL explicitly advises against running two blockers.
+                // Retain limited native URL filters only if uBOL could not
+                // initialize on the current WebView2 runtime.
+                if (!options.UnmodifiedWebViewProbe &&
+                    Interlocked.Read(ref ubolExtensionEnabled) != 1)
+                    SetupNetworkAdBlocker();
+                if (Interlocked.Read(ref ubolExtensionEnabled) == 1)
+                    await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                        "window.__TT_EXTERNAL_ADBLOCK__='uBlock Origin Lite';");
                 SetupFullscreenHandling();
                 SetupIpcBridge();
                 SetupAdblockDiagnosticMenu();
@@ -1118,7 +1146,8 @@ namespace TizenTubeWindows
                         try
                         {
                             string runtime = await webView.CoreWebView2.ExecuteScriptAsync(
-                                "Boolean(window.__TIZENTUBE_LOADER__ && window.__TIZENTUBE_LOADER__.adblock && window.__TIZENTUBE_LOADER__.adblock.options.enabled)");
+                                "Boolean(window.__TIZENTUBE_LOADER__ && " +
+                                "(window.__TT_EXTERNAL_ADBLOCK__ || window.__TIZENTUBE_LOADER__.adblock?.options.enabled))");
                             string style = await webView.CoreWebView2.ExecuteScriptAsync(
                                 "Boolean(document.getElementById('tizentube-adblock-styles'))");
                             if (runtime == "true") Interlocked.Exchange(ref adblockRuntimeObserved, 1);
@@ -1195,6 +1224,50 @@ namespace TizenTubeWindows
                 );
                 args.Response = emptyResponse;
             };
+        }
+
+        private async Task InitializeOpenSourceAdblockAsync()
+        {
+            const string pinnedVersion = "2026.1026.1812";
+            var addonRoot = Path.Combine(AppContext.BaseDirectory, "extensions", "ubol");
+            var manifest = Path.Combine(addonRoot, "manifest.json");
+            try
+            {
+                if (!File.Exists(manifest))
+                {
+                    Console.Error.WriteLine("[AdBlock] Packaged uBlock Origin Lite missing; limited fallback only");
+                    return;
+                }
+                // Never load a differently versioned or user-replaced addon.
+                using (var json = System.Text.Json.JsonDocument.Parse(File.ReadAllText(manifest)))
+                {
+                    if (json.RootElement.GetProperty("version").GetString() != pinnedVersion)
+                        throw new InvalidDataException("uBOL manifest version mismatch");
+                }
+                var installed = await webView.CoreWebView2.Profile.GetBrowserExtensionsAsync();
+                var active = installed.FirstOrDefault(ext =>
+                    ext.Name.Contains("uBlock Origin Lite", StringComparison.OrdinalIgnoreCase));
+                string stamp = Path.Combine(appDataDir, "ubol-pinned-version.txt");
+                bool mustInstall = active == null
+                    || !File.Exists(stamp) || File.ReadAllText(stamp).Trim() != pinnedVersion;
+                if (mustInstall)
+                {
+                    active = await webView.CoreWebView2.Profile.AddBrowserExtensionAsync(addonRoot);
+                    Directory.CreateDirectory(appDataDir);
+                    File.WriteAllText(stamp, pinnedVersion);
+                }
+                if (!active.IsEnabled) await active.EnableAsync(true);
+                var verified = await webView.CoreWebView2.Profile.GetBrowserExtensionsAsync();
+                if (!verified.Any(ext => ext.Id == active.Id && ext.IsEnabled))
+                    throw new InvalidOperationException("uBOL extension not enabled after installation");
+                Interlocked.Exchange(ref ubolExtensionEnabled, 1);
+                Console.WriteLine("[AdBlock] uBlock Origin Lite " + pinnedVersion + " enabled in WebView2 profile");
+            }
+            catch (Exception error)
+            {
+                Interlocked.Exchange(ref ubolExtensionEnabled, 0);
+                Console.Error.WriteLine("[AdBlock] uBOL failed; limited fallback: " + error.Message);
+            }
         }
 
         private void SetupFullscreenHandling()
@@ -2409,6 +2482,7 @@ namespace TizenTubeWindows
             sb.AppendLine($"    \"modsInitializedCount\": {Interlocked.Read(ref modsInitializedCount)},");
             sb.AppendLine($"    \"adblockRuntimeObserved\": {Interlocked.Read(ref adblockRuntimeObserved)},");
             sb.AppendLine($"    \"adblockStyleObserved\": {Interlocked.Read(ref adblockStyleObserved)},");
+            sb.AppendLine($"    \"ubolExtensionEnabled\": {Interlocked.Read(ref ubolExtensionEnabled)},");
             sb.AppendLine($"    \"windowCyclePass\": {Interlocked.Read(ref windowCyclePass)},");
             sb.AppendLine($"    \"windowFullMonitorPass\": {Interlocked.Read(ref windowFullMonitorPass)},");
             sb.AppendLine($"    \"windowRestorePass\": {Interlocked.Read(ref windowRestorePass)},");

@@ -42,6 +42,7 @@ jobs:
         shell: pwsh
         run: |
           npm test
+          node scripts/test_native_adblock_extension.js
           node scripts/test_native_updater.js
           node scripts/test_sponsorblock_real_skip_path.js
           node scripts/test_playback_failopen.js
@@ -177,6 +178,10 @@ jobs:
           if (Test-Path (Join-Path $app 'native')) { throw 'BUILD_OUTPUT_LEAKED_INTO_APP_PACKAGE' }
           Copy-Item LICENSE (Join-Path $pkg 'LICENSE')
           Copy-Item docs/GETTING_STARTED_WINDOWS.md (Join-Path $pkg 'LEEME_INSTALACION.md')
+          # The extension stays in the portable app, never installed in
+          # global Edge/Windows. Verify the exact official GPLv3 build hash.
+          & pwsh -NoProfile -File ./scripts/ci_package_ubol.ps1 -Destination (Join-Path $pkg 'extensions/ubol')
+          if ($LASTEXITCODE -ne 0) { throw 'UBOL_PACKAGING_FAILED' }
           foreach ($required in @('app/mods/tizentube.bundle.js','app/ui/styles.css','app/extension/manifest.json','TizenTubeHost.exe','LICENSE','LEEME_INSTALACION.md')) {
             if (!(Test-Path (Join-Path $pkg $required))) { throw "PACKAGE_MISSING_REQUIRED_FILE_$required" }
           }
@@ -189,7 +194,13 @@ jobs:
           if (!(Test-Path $smokePath)) { throw 'PORTABLE_HOST_TELEMETRY_MISSING' }
           $smoke = Get-Content $smokePath -Raw -Encoding utf8 | ConvertFrom-Json
           if ($smoke.summary.modsInitializedCount -lt 1) { throw 'PORTABLE_MODS_NOT_RUNNING' }
-          if ($smoke.summary.adblockStyleObserved -lt 1) { throw 'PORTABLE_ADBLOCK_CSS_NOT_LOADED' }
+          if ($smoke.summary.ubolExtensionEnabled -lt 1) { throw 'PORTABLE_UBOL_BROWSER_EXTENSION_NOT_ENABLED' }
+          $addonEvidence = Join-Path (Resolve-Path $pkg).Path 'extension-enabled-evidence.json'
+          $addonProbe = Start-Process -FilePath (Resolve-Path $exe).Path -WorkingDirectory (Resolve-Path $pkg).Path -ArgumentList @('--smoke-test','12','--adblock-extension-probe','--telemetry-file',$addonEvidence) -Wait -PassThru
+          if ($addonProbe.ExitCode -ne 0 -or !(Test-Path $addonEvidence)) { throw 'UBOL_WEBVIEW2_EXTENSION_PROBE_FAILED' }
+          $addon = Get-Content $addonEvidence -Raw -Encoding utf8 | ConvertFrom-Json
+          if ($addon.summary.ubolExtensionEnabled -ne 1) { throw 'UBOL_WEBVIEW2_INSTALLATION_NOT_ATTESTED' }
+          Copy-Item $addonEvidence 'release-out/extension-enabled-evidence.json' -Force
           Copy-Item $smokePath 'release-out/portable-smoke-evidence.json' -Force
           Remove-Item $smokePath -Force
           Write-Host '[OK] Self-contained portable host and bundled WebView2Loader verified by execution'
@@ -284,7 +295,7 @@ jobs:
           # folder; verifies backup and restoration without touching users.
           & (Join-Path $pkg 'TizenTubeHost.exe') --verify-in-place-updater
           if ($LASTEXITCODE -ne 0) { throw 'PORTABLE_IN_PLACE_UPDATE_FAILED' }
-          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.17.zip'
+          $zip = 'release-out/TizenTube-Windows-x64-v0.1.0-preview.18.zip'
           Compress-Archive -Path $pkg -DestinationPath $zip -CompressionLevel Optimal -Force
           if (!(Test-Path $zip)) { throw 'PORTABLE_ZIP_MISSING' }
           $zipSha = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -298,7 +309,7 @@ jobs:
         with:
           name: tizentube-windows-x64-portable-preview
           path: |
-            release-out/TizenTube-Windows-x64-v0.1.0-preview.17.zip
+            release-out/TizenTube-Windows-x64-v0.1.0-preview.18.zip
             release-out/SHA256SUMS.txt
             release-out/portable-smoke-evidence.json
             release-out/standalone-exe-smoke-evidence.json
@@ -307,5 +318,6 @@ jobs:
             release-out/floating-hotkey-evidence.json
             release-out/window-cycle-evidence.json
             release-out/experimental-tv-smoke-evidence.json
+            release-out/extension-enabled-evidence.json
           if-no-files-found: error
           retention-days: 14

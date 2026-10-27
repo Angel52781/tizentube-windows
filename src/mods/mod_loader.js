@@ -59,6 +59,10 @@ export class ModLoader {
     this.playback.on('timeupdate', ({ currentTime }) => {
       // When UI is mounted, AppUI coordinates skip handling, stats updates, IPC, and toast notifications.
       if (this.ui && this.ui.isMounted) return;
+      if (typeof document !== 'undefined') {
+        const visible = document.querySelector?.('video.html5-main-video');
+        if (visible && visible !== this.playback?.videoElement) return;
+      }
 
       const skipTarget = this.sponsorblock.checkSkip(currentTime);
       if (skipTarget !== null) {
@@ -120,17 +124,32 @@ export class ModLoader {
         .match(/[?&]v=([a-zA-Z0-9_-]{11})(?:[&#]|$)/)?.[1];
       if (id && id !== this.sponsorblock.currentVideoId && !this.ui?.isMounted)
         void this.sponsorblock.setVideo(id);
+      if (id && id === this.sponsorblock.currentVideoId &&
+          ['network_error', 'rate_limited', 'unavailable'].includes(
+            this.sponsorblock.lastFetchStatus) &&
+          Date.now() - this.sponsorblock.lastFetchTime > 30000)
+        void this.sponsorblock.setVideo(id);
 
       // WebView2/YouTube occasionally replaces the player while a prior
       // timeupdate listener remains attached to an old video. Supplement
       // event-driven skipping with a bounded 1.5s check of the real HTML5
       // video. The SponsorBlock UUID set prevents duplicate skips.
       if (!id || id !== this.sponsorblock.currentVideoId) return;
-      const video = this.playback?.videoElement
-        || (typeof document !== 'undefined'
-          ? document.querySelector?.('video.html5-main-video') : null);
+      const video = (typeof document !== 'undefined'
+          ? document.querySelector?.('video.html5-main-video') : null)
+        || this.playback?.videoElement;
       if (!video || !Number.isFinite(video.currentTime) || video.readyState < 2)
         return;
+      // SponsorBlock segments describe creator-integrated portions of the
+      // requested video, not YouTube's pre-roll/mid-roll ad playback.
+      if (typeof document !== 'undefined' &&
+          document.querySelector?.('.html5-video-player.ad-showing, #movie_player.ad-showing'))
+        return;
+      // A YouTube SPA may replace the player while the old video remains
+      // retained by the PlaybackEngine. Rebind before seeking so the jump
+      // targets the actual visible video, not a stale detached element.
+      if (this.playback?.videoElement !== video)
+        this.playback?.bindVideoElement?.(video);
       const target = this.sponsorblock.checkSkip(video.currentTime);
       if (target === null) return;
       if (this.ui?.isMounted && this.ui.handleSponsorBlockSkip) {

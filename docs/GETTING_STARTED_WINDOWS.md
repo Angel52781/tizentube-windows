@@ -1,4 +1,35 @@
-# TizenTube Windows — prueba personal (v0.1.0-preview.17)
+# TizenTube Windows — prueba personal (v0.1.0-preview.18)
+
+## Preview.18 — bloqueo de anuncios y SponsorBlock
+
+El bloqueador propio anterior solo incluía cinco patrones de red y limpieza
+de parte de la interfaz. No bastaba para impedir los anuncios de vídeo.
+Esta versión incorpora **uBlock Origin Lite para Microsoft Edge/WebView2**,
+gratuito y GPL-3.0, directamente dentro del ZIP de la aplicación. La versión
+de la extensión está fijada en 2026.1026.1812, con SHA-256
+`12a3be6e4c24c932677208bd0b8fff0689676ef2b0db689cfe794b02e0ed69fc`.
+Fuente: https://github.com/uBlockOrigin/uBOL-home/releases/tag/2026.1026.1812.
+El paquete incluye su LICENSE.txt y sus reglas; no instala extensiones en
+Edge, Chrome ni otros navegadores del ordenador. WebView2 comprueba que la
+extensión esté instalada y habilitada antes de cargar YouTube.
+
+Cuando uBO Lite está activo, TizenTube desactiva su interceptor antiguo para
+no ejecutar dos bloqueadores incompatibles. Si uBO Lite no está disponible
+se usa solo el filtro limitado de respaldo y se muestra esa condición en
+**Protecciones**. Las reglas comunitarias evolucionan; ninguna prueba local
+garantiza bloqueo completo de anuncios de YouTube en todas las cuentas.
+
+**SponsorBlock no bloquea los anuncios pre-roll ni mid-roll que sirve YouTube**:
+usa segmentos colaborativos para saltar introducciones, promociones
+integradas por el creador, cierres y categorías afines. La lógica revisada
+reconecta el vídeo real cuando YouTube lo sustituye y evita consumir un
+segmento durante la reproducción de un anuncio. El estado de consulta,
+segmentos detectados y saltos puede consultarse en Protecciones.
+
+El gate de la versión exige verificar en un Windows real que el addon MV3
+fue aceptado y habilitado por WebView2. Ese gate **no prueba por sí mismo**
+que un anuncio concreto desaparezca: se necesita prueba de reproducción
+de YouTube en el equipo del usuario.
 
 ## Preview.17 — actualización integrada sin navegador
 
