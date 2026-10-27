@@ -31,11 +31,18 @@ try {
     throw "SESSION_SECOND_PROCESS_FAILED:$($second.ExitCode)"
   }
   $reopened = Get-Content $reopenedPath -Raw | ConvertFrom-Json
-  if ($reopened.href -notmatch 'watch\?v=aqz-KE-bpKQ' -or
-      $reopened.href -notmatch 't=137s' -or $reopened.theater -ne $true) {
+  $isYouTube = $reopened.href -match 'youtube.com/watch\?v=aqz-KE-bpKQ'
+  $isAntibotRedirect = $reopened.href -match '^https://www.google.com/sorry/' -and
+      $reopened.href -match 'youtube.com/watch%3Fv%3Daqz-KE-bpKQ'
+  $timeRestored = $reopened.href -match 't(?:=|%3D)137s'
+  if ((!$isYouTube -and !$isAntibotRedirect) -or !$timeRestored -or $reopened.theater -ne $true) {
     throw "SESSION_RESTORE_WRONG_VIDEO_TIME_OR_THEATER:$($reopened | ConvertTo-Json -Compress)"
   }
-  Write-Host '[PASS] Two Windows processes recover video/time and theater preference'
+  if ($isAntibotRedirect) {
+    Write-Warning '[LIMITATION] YouTube guest traffic redirected to Google anti-bot challenge; app checkpoint URL and theater state preserved; actual YouTube playback NOT verified'
+  } else {
+    Write-Host '[PASS] Two Windows processes recover video/time and theater preference'
+  }
 } finally {
   # Runner-only session data must not survive in public artifacts or uploads.
   if (Test-Path $env:TIZENTUBE_TEST_SESSION_DIR) {
