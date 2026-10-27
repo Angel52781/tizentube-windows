@@ -339,6 +339,8 @@ namespace TizenTubeWindows
         private string adguardProbeStatus = "not-attempted";
         private long ubolYoutubeFilteringMode = 0;
         private long ubolBroadHostPermission = 0;
+        private long ubolRegisteredScripts = 0;
+        private long ubolEnabledRulesets = 0;
         private string ubolConfigurationStatus = "not-attempted";
         private bool initialAdDiagnosticQueued = false;
         private bool manualImmersiveMode = false;
@@ -1379,7 +1381,11 @@ namespace TizenTubeWindows
                         : before;
                     const verified = await chrome.runtime.sendMessage({
                         what: 'getFilteringMode', hostname: 'youtube.com' });
-                    return { permitted, before, after, verified };
+                    const registeredScripts = globalThis.chrome?.scripting?.getRegisteredContentScripts
+                        ? (await chrome.scripting.getRegisteredContentScripts()).length : -1;
+                    const enabledRulesets = globalThis.chrome?.declarativeNetRequest?.getEnabledRulesets
+                        ? (await chrome.declarativeNetRequest.getEnabledRulesets()).length : -1;
+                    return { permitted, before, after, verified, registeredScripts, enabledRulesets };
                   })().then(value => { self.__ttUbolProbeResult = value; })
                     .catch(error => { self.__ttUbolProbeResult = {
                       error: String(error?.message || error).slice(0, 180)
@@ -1407,6 +1413,14 @@ namespace TizenTubeWindows
                         result.TryGetProperty("verified", out var mode) &&
                         mode.TryGetInt32(out var level))
                         Interlocked.Exchange(ref ubolYoutubeFilteringMode, level);
+                    if (result.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                        result.TryGetProperty("registeredScripts", out var scripts) &&
+                        scripts.TryGetInt32(out var registered))
+                        Interlocked.Exchange(ref ubolRegisteredScripts, registered);
+                    if (result.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                        result.TryGetProperty("enabledRulesets", out var rulesets) &&
+                        rulesets.TryGetInt32(out var enabled))
+                        Interlocked.Exchange(ref ubolEnabledRulesets, enabled);
                     Console.WriteLine("[AdBlock] youtube.com uBOL filtering: " + raw);
                 }
                 if (Interlocked.Read(ref ubolBroadHostPermission) != 1 ||
@@ -2736,6 +2750,8 @@ namespace TizenTubeWindows
             sb.AppendLine($"    \"adguardProbeStatus\": \"{EscapeJson(adguardProbeStatus)}\",");
             sb.AppendLine($"    \"ubolYoutubeFilteringMode\": {Interlocked.Read(ref ubolYoutubeFilteringMode)},");
             sb.AppendLine($"    \"ubolBroadHostPermission\": {Interlocked.Read(ref ubolBroadHostPermission)},");
+            sb.AppendLine($"    \"ubolRegisteredScripts\": {Interlocked.Read(ref ubolRegisteredScripts)},");
+            sb.AppendLine($"    \"ubolEnabledRulesets\": {Interlocked.Read(ref ubolEnabledRulesets)},");
             sb.AppendLine($"    \"ubolConfigurationStatus\": \"{EscapeJson(ubolConfigurationStatus)}\",");
             sb.AppendLine($"    \"windowCyclePass\": {Interlocked.Read(ref windowCyclePass)},");
             sb.AppendLine($"    \"windowFullMonitorPass\": {Interlocked.Read(ref windowFullMonitorPass)},");

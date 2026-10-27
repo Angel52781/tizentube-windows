@@ -52,8 +52,10 @@ jobs:
             $summary = (Get-Content $evidence -Raw | ConvertFrom-Json).summary
             Write-Host "UBOL_DIAG: $($summary.ubolConfigurationStatus)"
             Write-Host "UBOL_ENABLED=$($summary.ubolExtensionEnabled) PERMISSION=$($summary.ubolBroadHostPermission) MODE=$($summary.ubolYoutubeFilteringMode)"
+            Write-Host "UBOL_EFFECTIVE_REGISTERED_SCRIPTS=$($summary.ubolRegisteredScripts) ENABLED_RULESETS=$($summary.ubolEnabledRulesets)"
             if ($proc.ExitCode -ne 0 -or $summary.ubolExtensionEnabled -ne 1 -or
-                $summary.ubolBroadHostPermission -ne 1 -or $summary.ubolYoutubeFilteringMode -ne 3) {
+                $summary.ubolBroadHostPermission -ne 1 -or $summary.ubolYoutubeFilteringMode -ne 3 -or
+                $summary.ubolRegisteredScripts -lt 1 -or $summary.ubolEnabledRulesets -lt 1) {
               throw 'UBOL_YOUTUBE_COMPLETE_FILTERING_NOT_VERIFIED'
             }
           } finally {
