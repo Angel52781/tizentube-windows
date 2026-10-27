@@ -1336,7 +1336,13 @@ namespace TizenTubeWindows
                 // scripts and DNR registration. Do not mutate its storage
                 // directly or install another blocker. Set Complete for
                 // youtube.com only, preserving filtering on other websites.
-                string script = @"(async () => {
+                // ExecuteScriptAsync serializes an unresolved Promise as {},
+                // rather than awaiting its value in WebView2. Publish the
+                // result synchronously to an extension-origin variable and
+                // poll it separately; this prevents a false ""unknown mode"".
+                string script = @"(() => {
+                  self.__ttUbolProbeResult = null;
+                  (async () => {
                     if (location.protocol !== 'chrome-extension:' ||
                         !globalThis.chrome?.runtime?.sendMessage ||
                         !globalThis.chrome?.permissions?.contains)
@@ -1352,8 +1358,21 @@ namespace TizenTubeWindows
                     const verified = await chrome.runtime.sendMessage({
                         what: 'getFilteringMode', hostname: 'youtube.com' });
                     return { permitted, before, after, verified };
+                  })().then(value => { self.__ttUbolProbeResult = value; })
+                    .catch(error => { self.__ttUbolProbeResult = {
+                      error: String(error?.message || error).slice(0, 180)
+                    }; });
+                  return true;
                 })()";
-                string raw = await settingsView.CoreWebView2.ExecuteScriptAsync(script);
+                await settingsView.CoreWebView2.ExecuteScriptAsync(script);
+                string raw = "null";
+                for (int attempt = 0; attempt < 40; attempt++)
+                {
+                    await Task.Delay(250);
+                    raw = await settingsView.CoreWebView2.ExecuteScriptAsync(
+                        "self.__ttUbolProbeResult ?? null");
+                    if (raw != "null" && raw != "{}") break;
+                }
                 ubolConfigurationStatus = "extension-script-result:" + raw;
                 using (var response = System.Text.Json.JsonDocument.Parse(raw))
                 {
