@@ -1298,8 +1298,10 @@ namespace TizenTubeWindows
             }
             catch (Exception error)
             {
+                var lastProbeStep = ubolConfigurationStatus;
                 ubolConfigurationStatus = "configuration-error:" +
-                    error.GetType().Name + ":" + error.Message;
+                    error.GetType().Name + ":" + error.Message +
+                    "|previous-step:" + lastProbeStep;
                 Console.Error.WriteLine("[AdBlock] uBOL mode verification failed: " + error.Message);
             }
         }
