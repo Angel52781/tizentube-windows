@@ -1,4 +1,4 @@
-# TizenTube Windows — prueba personal (v0.1.0-preview.16)
+# TizenTube Windows — prueba personal (v0.1.0-preview.17)
 
 ## Preview.17 — actualización integrada sin navegador
 
@@ -13,7 +13,7 @@ La única rama de desarrollo permanente es main. Las actualizaciones de la aplic
 
 La descarga se verifica mediante SHA256SUMS.txt, la instalación antigua se conserva como respaldo y el perfil de YouTube se mantiene fuera de la carpeta del programa.
 
-**Transición excepcional:** preview.15 tenía un fallo en su proceso auxiliar de actualización, que copiaba el ejecutable sin sus dependencias .NET. Por tanto, quienes todavía usen preview.15 deben instalar preview.16 manualmente una última vez. Preview.16 integra sus dependencias al ejecutar el actualizador y valida su arranque por separado en Windows. La sustitución entre dos versiones reales seguirá pendiente de una prueba integral.
+**Transición excepcional:** preview.15 tenía un fallo en su proceso auxiliar de actualización, que copiaba el ejecutable sin sus dependencias .NET. Preview.16 corrigió ese arranque, pero aún abría el navegador cuando la carpeta portable no tenía el nombre esperado. Si alguna de esas versiones te redirige a una descarga, extrae preview.17 manualmente una última vez. A partir de preview.17 el flujo integrado no depende del nombre de la carpeta. El reemplazo de una instalación personal real aún necesita verificación.
 
 ## Preview.15 — corrección de regresiones reportadas
 
@@ -35,7 +35,7 @@ Este es un **prototipo de escritorio no oficial**, todavía en pruebas. Abre You
 
 ## Instalación en Windows 10/11 (x64)
 
-1. Descarga `TizenTube-Windows-x64-v0.1.0-preview.13.zip` desde la sección **Assets** de la release de GitHub.
+1. Descarga `TizenTube-Windows-x64-v0.1.0-preview.17.zip` desde la sección **Assets** de la release de GitHub.
 2. Haz clic derecho en el ZIP y elige **Extraer todo**. Es importante extraerlo: no ejecutes el `.exe` directamente dentro del ZIP.
 3. Abre la carpeta `TizenTube-Windows-x64` y haz doble clic en **`TizenTubeHost.exe`**. Es el programa real, compilado en Windows con .NET 8 y WebView2. Desde preview.6 lleva AdBlock, SponsorBlock, DeArrow y el CSS dentro del propio EXE; incluso funciona sin `app`.
 4. Si Windows SmartScreen avisa que la aplicación no tiene un editor reconocido, se debe a que este prototipo no está firmado digitalmente. Ejecuta únicamente el ZIP descargado de la release oficial del repositorio del proyecto y verifica el SHA-256 publicado antes de decidir si confiar en el archivo.
