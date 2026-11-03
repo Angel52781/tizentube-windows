@@ -933,7 +933,8 @@ namespace TizenTubeWindows
                 // uBOL explicitly advises against running two blockers.
                 // Retain limited native URL filters only if uBOL could not
                 // initialize on the current WebView2 runtime.
-                if (!options.UnmodifiedWebViewProbe && !options.AdguardExtensionProbe)
+                if (!options.UnmodifiedWebViewProbe && !options.AdguardExtensionProbe &&
+                    Interlocked.Read(ref ubolExtensionEnabled) != 1)
                     SetupNetworkAdBlocker();
                 if (Interlocked.Read(ref ubolExtensionEnabled) == 1)
                     await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
