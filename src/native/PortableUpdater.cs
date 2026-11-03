@@ -11,12 +11,14 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Reflection;
+using Microsoft.Win32;
 
 namespace TizenTubeWindows
 {
     internal static class PortableUpdater
     {
-        private const int CurrentPreview = 22;
+        private const int CurrentPreview = 23;
         private const string Api = "https://api.github.com/repos/Angel52781/tizentube-windows/releases?per_page=30";
         private const string ZipPrefix = "TizenTube-Windows-x64-v0.1.0-preview.";
         private const string PortableFolder = "TizenTube-Windows-x64";
@@ -81,11 +83,35 @@ namespace TizenTubeWindows
                     bool portable = IsPortableInstallation(installed);
                     if (!portable)
                     {
-                        MessageBox.Show(owner, "La aplicación se está ejecutando fuera de una instalación portable completa." +
-                            "\n\nNo se reemplazará ninguna carpeta ni se abrirá una descarga inesperada." +
-                            "\nExtrae el paquete completo una vez y abre TizenTubeHost.exe desde esa carpeta.",
-                            "Actualización no disponible en esta ubicación",
-                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        var installChoice = MessageBox.Show(owner,
+                            "TizenTube se está ejecutando fuera de una instalación permanente en tu equipo (por ejemplo, directamente en el Escritorio o en Descargas)." +
+                            "\n\n¿Deseas instalar TizenTube en tu equipo?" +
+                            "\n\n• Se instalará de forma limpia en tu carpeta de programas (%LocalAppData%\\Programs\\TizenTube)." +
+                            "\n• Tendrás un único acceso directo limpio en tu Escritorio (sin carpetas sueltas de archivos)." +
+                            "\n• Las futuras actualizaciones se aplicarán automáticamente con un solo clic.",
+                            "Instalación de TizenTube",
+                            MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+
+                        if (installChoice == DialogResult.Yes)
+                        {
+                            if (InstallApplication(installed, out string newExe, out string error))
+                            {
+                                MessageBox.Show(owner,
+                                    "TizenTube se instaló correctamente en tu equipo." +
+                                    "\nSe ha creado el acceso directo en tu Escritorio." +
+                                    "\n\nSe abrirá ahora la versión instalada.",
+                                    "Instalación completada", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                Process.Start(new ProcessStartInfo(newExe) { UseShellExecute = true });
+                                owner.Close();
+                                return;
+                            }
+                            else
+                            {
+                                MessageBox.Show(owner, "No se pudo completar la instalación: " + error,
+                                    "TizenTube", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                return;
+                            }
+                        }
                         return;
                     }
                     var decision = MessageBox.Show(owner,
@@ -198,15 +224,46 @@ namespace TizenTubeWindows
                 return BitConverter.ToString(sha.ComputeHash(file)).Replace("-", "").ToLowerInvariant();
         }
 
+        public static bool IsProtectedDirectory(string directory)
+        {
+            if (string.IsNullOrWhiteSpace(directory)) return true;
+            try
+            {
+                string full = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string system = Environment.GetFolderPath(Environment.SpecialFolder.System).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string downloads = Path.Combine(userProfile, "Downloads");
+
+                if (string.Equals(full, desktop, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(full, userProfile, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(full, system, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(full, windows, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(full, localAppData, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(full, appData, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(full, downloads, StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                if (Path.GetPathRoot(full)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    .Equals(full, StringComparison.OrdinalIgnoreCase) == true)
+                    return true;
+            }
+            catch { return true; }
+            return false;
+        }
+
         private static bool IsPortableInstallation(string directory)
         {
             if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
                 return false;
+            if (IsProtectedDirectory(directory))
+                return false;
             // Never treat a random folder as a safe replacement target.
             // The folder NAME, however, is a user choice and must not matter.
-            return File.Exists(Path.Combine(directory, "TizenTubeHost.exe"))
-                && File.Exists(Path.Combine(directory, "TizenTubeHost.runtimeconfig.json"))
-                && File.Exists(Path.Combine(directory, "LEEME_INSTALACION.md"));
+            return File.Exists(Path.Combine(directory, "TizenTubeHost.exe"));
         }
 
         private static void StageUpdaterHost(string install, string destination)
@@ -225,9 +282,158 @@ namespace TizenTubeWindows
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 File.Copy(source, target, false);
             }
-            if (!File.Exists(Path.Combine(destination, "TizenTubeHost.exe")) ||
-                !File.Exists(Path.Combine(destination, "TizenTubeHost.runtimeconfig.json")))
-                throw new InvalidDataException("Staged updater lacks native executable or runtime configuration");
+            if (!File.Exists(Path.Combine(destination, "TizenTubeHost.exe")))
+                throw new InvalidDataException("Staged updater lacks native executable");
+        }
+
+        public static void CreateShortcut(string shortcutPath, string targetPath, string description = "TizenTube Windows")
+        {
+            try
+            {
+                Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+                if (shellType != null)
+                {
+                    object shell = Activator.CreateInstance(shellType);
+                    object shortcut = shellType.InvokeMember("CreateShortcut",
+                        BindingFlags.InvokeMethod, null, shell, new object[] { shortcutPath });
+                    Type shortcutType = shortcut.GetType();
+                    shortcutType.InvokeMember("TargetPath",
+                        BindingFlags.SetProperty, null, shortcut, new object[] { targetPath });
+                    shortcutType.InvokeMember("WorkingDirectory",
+                        BindingFlags.SetProperty, null, shortcut, new object[] { Path.GetDirectoryName(targetPath) });
+                    shortcutType.InvokeMember("Description",
+                        BindingFlags.SetProperty, null, shortcut, new object[] { description });
+                    shortcutType.InvokeMember("IconLocation",
+                        BindingFlags.SetProperty, null, shortcut, new object[] { targetPath + ",0" });
+                    shortcutType.InvokeMember("Save",
+                        BindingFlags.InvokeMethod, null, shortcut, null);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"[WARN] Shortcut creation failed: {ex.Message}");
+            }
+        }
+
+        public static string GetDefaultInstallDirectory()
+        {
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Programs", "TizenTube");
+        }
+
+        public static bool InstallApplication(string sourceDir, out string installedExe, out string errorMessage)
+        {
+            installedExe = null;
+            errorMessage = null;
+            try
+            {
+                string targetDir = GetDefaultInstallDirectory();
+                Directory.CreateDirectory(targetDir);
+
+                if (Directory.Exists(sourceDir))
+                {
+                    foreach (var file in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
+                    {
+                        if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0) continue;
+                        string rel = Path.GetRelativePath(sourceDir, file);
+                        string dest = Path.Combine(targetDir, rel);
+                        Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                        File.Copy(file, dest, true);
+                    }
+                }
+                else if (File.Exists(sourceDir))
+                {
+                    string dest = Path.Combine(targetDir, "TizenTubeHost.exe");
+                    File.Copy(sourceDir, dest, true);
+                }
+
+                installedExe = Path.Combine(targetDir, "TizenTubeHost.exe");
+                if (!File.Exists(installedExe))
+                {
+                    errorMessage = "No se encontró TizenTubeHost.exe para instalar.";
+                    return false;
+                }
+
+                // Desktop shortcut
+                string desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                string desktopShortcut = Path.Combine(desktop, "TizenTube.lnk");
+                CreateShortcut(desktopShortcut, installedExe);
+
+                // Start Menu shortcut
+                string startMenu = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
+                    "Programs", "TizenTube");
+                Directory.CreateDirectory(startMenu);
+                string startMenuShortcut = Path.Combine(startMenu, "TizenTube.lnk");
+                CreateShortcut(startMenuShortcut, installedExe);
+
+                // Register in Windows Add/Remove programs
+                RegisterInWindowsUninstall(targetDir, installedExe);
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                errorMessage = ex.Message;
+                return false;
+            }
+        }
+
+        private static void RegisterInWindowsUninstall(string installDir, string exePath)
+        {
+            try
+            {
+                using (var key = Registry.CurrentUser.CreateSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Uninstall\TizenTube"))
+                {
+                    if (key != null)
+                    {
+                        key.SetValue("DisplayName", "TizenTube");
+                        key.SetValue("DisplayVersion", "0.1.0-preview.23");
+                        key.SetValue("Publisher", "TizenTube Windows Contributors");
+                        key.SetValue("DisplayIcon", exePath);
+                        key.SetValue("InstallLocation", installDir);
+                        key.SetValue("UninstallString", $"\"{exePath}\" --uninstall");
+                        key.SetValue("NoModify", 1);
+                        key.SetValue("NoRepair", 1);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        public static int UninstallApplication()
+        {
+            try
+            {
+                string desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                string desktopShortcut = Path.Combine(desktop, "TizenTube.lnk");
+                if (File.Exists(desktopShortcut)) File.Delete(desktopShortcut);
+
+                string startMenu = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
+                    "Programs", "TizenTube");
+                if (Directory.Exists(startMenu)) Directory.Delete(startMenu, true);
+
+                try
+                {
+                    Registry.CurrentUser.DeleteSubKeyTree(
+                        @"Software\Microsoft\Windows\CurrentVersion\Uninstall\TizenTube", false);
+                }
+                catch { }
+
+                MessageBox.Show("TizenTube se ha desinstalado de accesos directos y del registro.\n" +
+                    "La carpeta de la aplicación puede eliminarse una vez cerrada la ventana.",
+                    "Desinstalación de TizenTube", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Error durante la desinstalación: " + ex.Message,
+                    "Desinstalación de TizenTube", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return 1;
+            }
         }
 
         public static int VerifyDetachedUpdaterHost(string installed, string scratch)
@@ -337,7 +543,6 @@ namespace TizenTubeWindows
                 foreach (var directory in new[] { install, payload })
                 {
                     File.WriteAllText(Path.Combine(directory, "LEEME_INSTALACION.md"), "portable");
-                    File.WriteAllText(Path.Combine(directory, "TizenTubeHost.runtimeconfig.json"), "{}");
                 }
                 File.WriteAllText(Path.Combine(install, "TizenTubeHost.exe"), "old-exe");
                 File.WriteAllText(Path.Combine(payload, "TizenTubeHost.exe"), "new-exe");

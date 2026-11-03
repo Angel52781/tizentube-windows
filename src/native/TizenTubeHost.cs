@@ -193,6 +193,8 @@ namespace TizenTubeWindows
             Console.WriteLine("  --diagnose-ads        Save a local, metadata-only ad structure report on first load");
             Console.WriteLine("  --window-cycle-test   Test borderless fullscreen and native window restoration");
             Console.WriteLine("  --floating-window-test  Verify Windows topmost floating window and restore");
+            Console.WriteLine("  --install             Instala TizenTube en %LocalAppData%\Programs\TizenTube con acceso directo");
+            Console.WriteLine("  --uninstall           Elimina accesos directos y entradas de registro de TizenTube");
             Console.WriteLine("  --help, -h            Show this help message");
         }
     }
@@ -213,6 +215,21 @@ namespace TizenTubeWindows
             catch { }
 
             var options = HostOptions.Parse(args);
+            if (args?.Length == 1 && args[0] == "--install")
+            {
+                string source = Path.GetFullPath(Path.GetDirectoryName(Application.ExecutablePath));
+                if (PortableUpdater.InstallApplication(source, out string installedExe, out string error))
+                {
+                    Console.WriteLine("INSTALLED: " + installedExe);
+                    return 0;
+                }
+                Console.Error.WriteLine("INSTALL_FAILED: " + error);
+                return 1;
+            }
+            if (args?.Length == 1 && args[0] == "--uninstall")
+            {
+                return PortableUpdater.UninstallApplication();
+            }
             if (args?.Length == 1 && args[0] == "--verify-in-place-updater")
                 return PortableUpdater.VerifyInPlaceUpdate();
             if (args?.Length == 2 && args[0] == "--verify-detached-updater-host")

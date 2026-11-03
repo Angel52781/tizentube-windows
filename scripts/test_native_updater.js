@@ -8,7 +8,7 @@ const toolbar = fs.readFileSync('src/native/NavigationToolbar.cs', 'utf8');
 const project = fs.readFileSync('src/native/TizenTubeWindows.csproj', 'utf8');
 const ci = fs.readFileSync('.github/workflows/windows-native-validation.yml', 'utf8');
 const loader = fs.readFileSync('src/mods/mod_loader.js', 'utf8');
-const preview = '0.1.0-preview.22';
+const preview = '0.1.0-preview.23';
 
 assert.ok(project.includes('<Version>' + preview + '</Version>'));
 assert.ok(ci.includes('TizenTube-Windows-x64-v' + preview + '.zip'));
@@ -17,7 +17,8 @@ assert.ok(updater.includes('SHA256SUMS.txt') && updater.includes('FileSha256(arc
 assert.ok(updater.includes('MessageBoxButtons.YesNo'));
 assert.ok(updater.includes('StageUpdaterHost(installed, helperDirectory)'));
 assert.ok(updater.includes('File.Copy(source, target, false)'));
-assert.ok(updater.includes('TizenTubeHost.runtimeconfig.json'));
+assert.ok(updater.includes('IsProtectedDirectory') && updater.includes('InstallApplication'));
+assert.ok(host.includes('--install') && host.includes('--uninstall'));
 assert.ok(updater.includes('VerifyDetachedUpdaterHost'));
 assert.ok(updater.includes('VerifyInPlaceUpdate') && host.includes('--verify-in-place-updater'),
   'Windows tests exercise replacement in a renamed folder');

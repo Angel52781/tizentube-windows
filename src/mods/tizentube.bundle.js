@@ -291,7 +291,9 @@ class PlaybackEngine {
 
     const onRateChange = () => {
       this.state.playbackRate = video.playbackRate;
-      this.savePreferences();
+      // Do not auto-persist transient playback rate changes (e.g. YouTube
+      // long-press 2x speedup or transient ad skips). Preferences are saved
+      // when setPlaybackRate() is explicitly invoked.
       this.emit('ratechange', { playbackRate: video.playbackRate });
     };
 
@@ -310,7 +312,7 @@ class PlaybackEngine {
     ];
 
     // Apply saved preferences
-    if (this.state.playbackRate !== 1.0) {
+    if (this.state.playbackRate !== 1.0 && this.state.playbackRate <= 2.0) {
       video.playbackRate = this.state.playbackRate;
     }
     if (this.state.volume !== 100) {
@@ -681,7 +683,14 @@ class PlaybackEngine {
           this.state.isMuted = parsed.isMuted;
         }
         if (typeof parsed.playbackRate === 'number' && !isNaN(parsed.playbackRate)) {
-          this.state.playbackRate = Math.max(0.25, Math.min(4.0, parsed.playbackRate));
+          // Playback speed preferences must be in standard range (0.25 to 2.0).
+          // If a speed > 2.0 was saved (e.g. ad skip speedup leftover from older previews),
+          // sanitize back to default 1.0.
+          if (parsed.playbackRate > 2.0 || parsed.playbackRate < 0.25) {
+            this.state.playbackRate = 1.0;
+          } else {
+            this.state.playbackRate = parsed.playbackRate;
+          }
         }
       }
     } catch (_) {}
