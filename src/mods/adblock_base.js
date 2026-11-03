@@ -187,7 +187,7 @@ export class AdBlockBase {
         const url = new URL(this.url);
         if ((url.hostname === 'www.youtube.com' || url.hostname === 'youtube.com'
           || url.hostname === 'm.youtube.com') &&
-          /^\/youtubei\/v1\/(player|browse|search|next)(?:\/|$)/.test(url.pathname)) {
+          /^\/youtubei\/v1\/(browse|search|next)(?:\/|$)/.test(url.pathname)) {
           self.cleanAdData(result);
         }
       } catch (_) { /* Malformed or absent URL: never break playback. */ }
@@ -205,6 +205,7 @@ export class AdBlockBase {
 
     const isTvPayload = Boolean(obj.contents?.tvBrowseRenderer)
       || (typeof location !== 'undefined' && /^\/tv(?:\/|$)/.test(location.pathname || ''));
+
 
     if (obj.adPlacements) {
       if (isTvPayload) obj.adPlacements = [];

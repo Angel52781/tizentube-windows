@@ -2280,7 +2280,7 @@ class AdBlockBase {
         const url = new URL(this.url);
         if ((url.hostname === 'www.youtube.com' || url.hostname === 'youtube.com'
           || url.hostname === 'm.youtube.com') &&
-          /^\/youtubei\/v1\/(player|browse|search|next)(?:\/|$)/.test(url.pathname)) {
+          /^\/youtubei\/v1\/(browse|search|next)(?:\/|$)/.test(url.pathname)) {
           self.cleanAdData(result);
         }
       } catch (_) { /* Malformed or absent URL: never break playback. */ }
@@ -2298,6 +2298,7 @@ class AdBlockBase {
 
     const isTvPayload = Boolean(obj.contents?.tvBrowseRenderer)
       || (typeof location !== 'undefined' && /^\/tv(?:\/|$)/.test(location.pathname || ''));
+
 
     if (obj.adPlacements) {
       if (isTvPayload) obj.adPlacements = [];
@@ -4532,13 +4533,20 @@ class AppUI {
       if (videoId !== this.currentVideoId) {
         this.currentVideoId = videoId;
         if (videoId) {
+          // Re-bind video element if available when navigating to a watch page
+          const video = document.querySelector?.('video.html5-main-video') || document.querySelector?.('video');
+          if (video && this.playback && this.playback.videoElement !== video) {
+            this.playback.bindVideoElement(video);
+          }
           this.onVideoChanged(videoId);
           if (this.ipc) {
             this.ipc.send('memory:trim');
           }
         } else {
           if (this.playback) {
-            this.playback.unbindVideoElement();
+            if (this.playback.videoElement && !this.playback.videoElement.paused) {
+              try { this.playback.videoElement.pause(); } catch (_) {}
+            }
             this.playback.state.isPlaying = false;
             this.playback.state.currentTime = 0;
           }
@@ -4774,7 +4782,7 @@ class ModLoader {
     this.sponsorblock = new SponsorBlockBase(config.features?.sponsorblock || {});
     this.dearrow = new DeArrowBase(config.features?.dearrow || {});
     this.playback = new PlaybackEngine(config.features?.playback || {});
-    this.viewing = new ViewingExperience(this.playback, config.features?.viewing || {});
+    this.viewing = new ViewingExperience(this.playback, { restoreOnLaunch: false, ...(config.features?.viewing || {}) });
     this.navigation = new NavigationManager();
 
     this.ui = new AppUI({

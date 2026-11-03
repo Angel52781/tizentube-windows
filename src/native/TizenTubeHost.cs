@@ -439,6 +439,10 @@ namespace TizenTubeWindows
                 theaterPreferenceFile = Path.Combine(sessionTestRoot, "theater-preference.json");
                 lastVideoSessionFile = Path.Combine(sessionTestRoot, "last-video-session.json");
             }
+            if (!this.options.SessionSetupProbe && !this.options.SessionRestoreProbe)
+            {
+                try { if (File.Exists(lastVideoSessionFile)) File.Delete(lastVideoSessionFile); } catch { }
+            }
             // Window layout is independent of WebView2's Google login data.
             windowPlacementFile = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

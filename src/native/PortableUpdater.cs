@@ -18,7 +18,7 @@ namespace TizenTubeWindows
 {
     internal static class PortableUpdater
     {
-        private const int CurrentPreview = 23;
+        private const int CurrentPreview = 24;
         private const string Api = "https://api.github.com/repos/Angel52781/tizentube-windows/releases?per_page=30";
         private const string ZipPrefix = "TizenTube-Windows-x64-v0.1.0-preview.";
         private const string PortableFolder = "TizenTube-Windows-x64";
@@ -390,7 +390,7 @@ namespace TizenTubeWindows
                     if (key != null)
                     {
                         key.SetValue("DisplayName", "TizenTube");
-                        key.SetValue("DisplayVersion", "0.1.0-preview.23");
+                        key.SetValue("DisplayVersion", "0.1.0-preview.24");
                         key.SetValue("Publisher", "TizenTube Windows Contributors");
                         key.SetValue("DisplayIcon", exePath);
                         key.SetValue("InstallLocation", installDir);

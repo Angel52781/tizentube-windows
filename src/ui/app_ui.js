@@ -405,13 +405,20 @@ export class AppUI {
       if (videoId !== this.currentVideoId) {
         this.currentVideoId = videoId;
         if (videoId) {
+          // Re-bind video element if available when navigating to a watch page
+          const video = document.querySelector?.('video.html5-main-video') || document.querySelector?.('video');
+          if (video && this.playback && this.playback.videoElement !== video) {
+            this.playback.bindVideoElement(video);
+          }
           this.onVideoChanged(videoId);
           if (this.ipc) {
             this.ipc.send('memory:trim');
           }
         } else {
           if (this.playback) {
-            this.playback.unbindVideoElement();
+            if (this.playback.videoElement && !this.playback.videoElement.paused) {
+              try { this.playback.videoElement.pause(); } catch (_) {}
+            }
             this.playback.state.isPlaying = false;
             this.playback.state.currentTime = 0;
           }

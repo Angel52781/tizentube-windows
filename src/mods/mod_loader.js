@@ -24,7 +24,7 @@ export class ModLoader {
     this.sponsorblock = new SponsorBlockBase(config.features?.sponsorblock || {});
     this.dearrow = new DeArrowBase(config.features?.dearrow || {});
     this.playback = new PlaybackEngine(config.features?.playback || {});
-    this.viewing = new ViewingExperience(this.playback, config.features?.viewing || {});
+    this.viewing = new ViewingExperience(this.playback, { restoreOnLaunch: false, ...(config.features?.viewing || {}) });
     this.navigation = new NavigationManager();
 
     this.ui = new AppUI({
