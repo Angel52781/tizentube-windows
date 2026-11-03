@@ -2287,10 +2287,6 @@ class AdBlockBase {
   cleanAdData(obj) {
     if (!obj || typeof obj !== 'object') return;
 
-    // Original TizenTube (mods/features/adblock.js, f99945a) targets
-    // YouTube TV. It preserves ad fields with empty values instead of
-    // deleting properties. Desktop YouTube has different response contracts;
-    // retain the port's existing behavior there until it is E2E verified.
     const isTvPayload = Boolean(obj.contents?.tvBrowseRenderer)
       || (typeof location !== 'undefined' && /^\/tv(?:\/|$)/.test(location.pathname || ''));
 
@@ -2747,18 +2743,6 @@ class AdBlockBase {
           break;
         }
       }
-
-      // 2. Mute and fast-forward unskippable video ads
-      const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
-      if (video && !video.paused && Number.isFinite(video.duration) && video.duration > 0) {
-        try {
-          if (!video.muted) { video.muted = true; this._preAdMuted = true; }
-          if (video.playbackRate < 16) { this._preAdRate = video.playbackRate; video.playbackRate = 16; }
-          video.currentTime = video.duration - 0.1;
-          this.adVideoSpeedupCount++;
-        } catch (_) {}
-      }
-
     };
 
     this.skipObserver = new MutationObserver(() => {
@@ -4536,11 +4520,22 @@ class AppUI {
       const urlMatch = href.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
       const videoId = urlMatch ? urlMatch[1] : null;
 
-      if (videoId && videoId !== this.currentVideoId) {
+      if (videoId !== this.currentVideoId) {
         this.currentVideoId = videoId;
-        this.onVideoChanged(videoId);
-        if (this.ipc) {
-          this.ipc.send('memory:trim');
+        if (videoId) {
+          this.onVideoChanged(videoId);
+          if (this.ipc) {
+            this.ipc.send('memory:trim');
+          }
+        } else {
+          if (this.playback) {
+            this.playback.unbindVideoElement();
+            this.playback.state.isPlaying = false;
+            this.playback.state.currentTime = 0;
+          }
+          if (this.playerControls) {
+            this.playerControls.update({ isPlaying: false, currentTime: 0, duration: 0 });
+          }
         }
       }
     };

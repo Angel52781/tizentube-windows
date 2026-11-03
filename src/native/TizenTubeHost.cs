@@ -1915,6 +1915,7 @@ namespace TizenTubeWindows
 
         private string GetDefaultLaunchUrl()
         {
+            if (!options.SessionRestoreProbe) return "https://www.youtube.com";
             try
             {
                 if (File.Exists(lastVideoSessionFile))

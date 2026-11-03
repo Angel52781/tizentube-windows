@@ -402,11 +402,22 @@ export class AppUI {
       const urlMatch = href.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
       const videoId = urlMatch ? urlMatch[1] : null;
 
-      if (videoId && videoId !== this.currentVideoId) {
+      if (videoId !== this.currentVideoId) {
         this.currentVideoId = videoId;
-        this.onVideoChanged(videoId);
-        if (this.ipc) {
-          this.ipc.send('memory:trim');
+        if (videoId) {
+          this.onVideoChanged(videoId);
+          if (this.ipc) {
+            this.ipc.send('memory:trim');
+          }
+        } else {
+          if (this.playback) {
+            this.playback.unbindVideoElement();
+            this.playback.state.isPlaying = false;
+            this.playback.state.currentTime = 0;
+          }
+          if (this.playerControls) {
+            this.playerControls.update({ isPlaying: false, currentTime: 0, duration: 0 });
+          }
         }
       }
     };
