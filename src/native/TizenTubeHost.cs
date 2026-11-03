@@ -1029,12 +1029,12 @@ namespace TizenTubeWindows
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"[ERROR] WebView2 initialization failed: {ex.Message}");
+                Console.Error.WriteLine($"[ERROR] WebView2 initialization failed: {ex}");
                 Debug.WriteLine($"[ERROR] WebView2 initialization failed: {ex}");
                 this.ExitCode = 2;
                 if (options.SmokeTest)
                 {
-                    DumpTelemetryReport("initialization-failure");
+                    DumpTelemetryReport("initialization-failure: " + ex.GetType().Name + ": " + ex.Message);
                     this.Close();
                 }
                 else
@@ -1280,22 +1280,29 @@ namespace TizenTubeWindows
 
         private void SetupNetworkAdBlocker()
         {
-            // Intercept and drop ad network traffic at the protocol layer (Network-level AdBlock)
-            webView.CoreWebView2.AddWebResourceRequestedFilter("*googleads*", CoreWebView2WebResourceContext.All);
-            webView.CoreWebView2.AddWebResourceRequestedFilter("*doubleclick*", CoreWebView2WebResourceContext.All);
-            webView.CoreWebView2.AddWebResourceRequestedFilter("*youtube.com/pagead/*", CoreWebView2WebResourceContext.All);
-            webView.CoreWebView2.AddWebResourceRequestedFilter("*youtube.com/ptracking*", CoreWebView2WebResourceContext.All);
-            webView.CoreWebView2.AddWebResourceRequestedFilter("*youtube.com/api/stats/ads*", CoreWebView2WebResourceContext.All);
-
-            webView.CoreWebView2.WebResourceRequested += (s, args) =>
+            try
             {
-                Interlocked.Increment(ref blockedAdCount);
-                // Create an empty HTTP 204 No Content response to drop ad request
-                var emptyResponse = webView.CoreWebView2.Environment.CreateWebResourceResponse(
-                    null, 204, "No Content", "Content-Type: text/plain"
-                );
-                args.Response = emptyResponse;
-            };
+                // Intercept and drop ad network traffic at the protocol layer (Network-level AdBlock)
+                webView.CoreWebView2.AddWebResourceRequestedFilter("*googleads*", CoreWebView2WebResourceContext.All);
+                webView.CoreWebView2.AddWebResourceRequestedFilter("*doubleclick*", CoreWebView2WebResourceContext.All);
+                webView.CoreWebView2.AddWebResourceRequestedFilter("*youtube.com/pagead/*", CoreWebView2WebResourceContext.All);
+                webView.CoreWebView2.AddWebResourceRequestedFilter("*youtube.com/ptracking*", CoreWebView2WebResourceContext.All);
+                webView.CoreWebView2.AddWebResourceRequestedFilter("*youtube.com/api/stats/ads*", CoreWebView2WebResourceContext.All);
+
+                webView.CoreWebView2.WebResourceRequested += (s, args) =>
+                {
+                    Interlocked.Increment(ref blockedAdCount);
+                    // Create an empty HTTP 204 No Content response to drop ad request
+                    var emptyResponse = webView.CoreWebView2.Environment.CreateWebResourceResponse(
+                        null, 204, "No Content", "Content-Type: text/plain"
+                    );
+                    args.Response = emptyResponse;
+                };
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine("[WARN] SetupNetworkAdBlocker failed: " + ex.Message);
+            }
         }
 
         private async Task InitializeOpenSourceAdblockAsync()

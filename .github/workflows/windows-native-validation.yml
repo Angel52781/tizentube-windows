@@ -79,6 +79,7 @@ jobs:
           foreach ($folder in @('mods','ui','runtime','core','extension')) {
             Copy-Item -Path "src/$folder" -Destination "windows-out/app/$folder" -Recurse -Force
           }
+          & pwsh -NoProfile -File ./scripts/ci_package_ubol.ps1 -Destination "windows-out/extensions/ubol"
           $exe = Get-Item windows-out/TizenTubeHost.exe
           if ($exe.Length -lt 10000) { throw 'NATIVE_HOST_EXE_UNEXPECTEDLY_SMALL' }
           $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
