@@ -967,6 +967,9 @@ namespace TizenTubeWindows
                 SetupFullscreenHandling();
                 SetupIpcBridge();
                 SetupAdblockDiagnosticMenu();
+                if (options.SessionRestoreProbe)
+                    await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
+                        "window.__TT_RESTORE_ON_LAUNCH__ = true;");
                 if (!options.UnmodifiedWebViewProbe) await InjectModsAsync();
 
                 if (options.FloatingVisualProbe)
