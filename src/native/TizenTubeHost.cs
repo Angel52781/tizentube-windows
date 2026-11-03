@@ -193,7 +193,7 @@ namespace TizenTubeWindows
             Console.WriteLine("  --diagnose-ads        Save a local, metadata-only ad structure report on first load");
             Console.WriteLine("  --window-cycle-test   Test borderless fullscreen and native window restoration");
             Console.WriteLine("  --floating-window-test  Verify Windows topmost floating window and restore");
-            Console.WriteLine("  --install             Instala TizenTube en %LocalAppData%\Programs\TizenTube con acceso directo");
+            Console.WriteLine(@"  --install             Instala TizenTube en %LocalAppData%\Programs\TizenTube con acceso directo");
             Console.WriteLine("  --uninstall           Elimina accesos directos y entradas de registro de TizenTube");
             Console.WriteLine("  --help, -h            Show this help message");
         }
