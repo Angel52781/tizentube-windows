@@ -794,6 +794,30 @@ namespace TizenTubeWindows
             SendMessage(Handle, WmNcLButtonDown, (IntPtr)HtCaption, IntPtr.Zero);
         }
 
+        private void ResizeNativeWindow(int hitTestCode)
+        {
+            if (nativeImmersiveActive) return;
+            ReleaseCapture();
+            SendMessage(Handle, WmNcLButtonDown, (IntPtr)hitTestCode, IntPtr.Zero);
+        }
+
+        private void ScaleFloatingWindow(double delta)
+        {
+            if (!nativeFloatingActive) return;
+            var area = Screen.FromControl(this).WorkingArea;
+            int newW = (int)Math.Round(Width * (1.0 + delta));
+            newW = Math.Max(260, Math.Min(newW, area.Width - 30));
+            int newH = (int)Math.Round(newW * 9.0 / 16.0);
+            newH = Math.Max(146, Math.Min(newH, area.Height - 30));
+
+            int newX = Right - newW;
+            int newY = Bottom - newH;
+            if (newX < area.Left) newX = area.Left + 10;
+            if (newY < area.Top) newY = area.Top + 10;
+
+            Bounds = new Rectangle(newX, newY, newW, newH);
+        }
+
         private void ToggleNativeMaximize()
         {
             if (nativeImmersiveActive || nativeFloatingActive) return;
@@ -2448,6 +2472,34 @@ namespace TizenTubeWindows
                     if (json.Contains("\"channel\":\"window:drag\""))
                     {
                         DragNativeWindow();
+                        return;
+                    }
+
+                    if (json.Contains("\"channel\":\"window:resize\""))
+                    {
+                        int hit = HtRight;
+                        if (json.Contains("\"direction\":\"left\"")) hit = HtLeft;
+                        else if (json.Contains("\"direction\":\"right\"")) hit = HtRight;
+                        else if (json.Contains("\"direction\":\"top\"")) hit = HtTop;
+                        else if (json.Contains("\"direction\":\"bottom\"")) hit = HtBottom;
+                        else if (json.Contains("\"direction\":\"topleft\"")) hit = HtTopLeft;
+                        else if (json.Contains("\"direction\":\"topright\"")) hit = HtTopRight;
+                        else if (json.Contains("\"direction\":\"bottomleft\"")) hit = HtBottomLeft;
+                        else if (json.Contains("\"direction\":\"bottomright\"")) hit = HtBottomRight;
+
+                        ResizeNativeWindow(hit);
+                        return;
+                    }
+
+                    if (json.Contains("\"channel\":\"window:scale-floating\""))
+                    {
+                        using (var doc = System.Text.Json.JsonDocument.Parse(json))
+                        {
+                            if (doc.RootElement.TryGetProperty("delta", out var deltaProp))
+                            {
+                                ScaleFloatingWindow(deltaProp.GetDouble());
+                            }
+                        }
                         return;
                     }
 

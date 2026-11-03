@@ -64,12 +64,53 @@ html.tt-floating-mode #tt-floating-header:hover {
   opacity: 1 !important;
 }
 html.tt-floating-mode .tt-float-btn {
-  background: rgba(255,255,255,0.15) !important; border: none !important; color: #fff !important;
+  background: rgba(255,255,255,0.18) !important; border: none !important; color: #fff !important;
   cursor: pointer !important; padding: 2px 8px !important; border-radius: 4px !important;
   font-size: 13px !important; line-height: 20px !important; display: inline-flex !important;
+  align-items: center !important; justify-content: center !important; margin-left: 6px !important;
+  font-family: sans-serif !important;
 }
 html.tt-floating-mode .tt-float-btn:hover {
-  background: rgba(255,255,255,0.3) !important;
+  background: rgba(255,255,255,0.35) !important;
+}
+html.tt-floating-mode .tt-resize-grip {
+  position: fixed !important;
+  z-index: 2147483647 !important;
+  pointer-events: auto !important;
+  background: transparent !important;
+  user-select: none !important;
+}
+html.tt-floating-mode .tt-grip-top {
+  top: 0 !important; left: 16px !important; right: 16px !important; height: 10px !important;
+  cursor: ns-resize !important;
+}
+html.tt-floating-mode .tt-grip-bottom {
+  bottom: 0 !important; left: 16px !important; right: 16px !important; height: 10px !important;
+  cursor: ns-resize !important;
+}
+html.tt-floating-mode .tt-grip-left {
+  left: 0 !important; top: 16px !important; bottom: 16px !important; width: 10px !important;
+  cursor: ew-resize !important;
+}
+html.tt-floating-mode .tt-grip-right {
+  right: 0 !important; top: 16px !important; bottom: 16px !important; width: 10px !important;
+  cursor: ew-resize !important;
+}
+html.tt-floating-mode .tt-grip-topleft {
+  top: 0 !important; left: 0 !important; width: 16px !important; height: 16px !important;
+  cursor: nwse-resize !important;
+}
+html.tt-floating-mode .tt-grip-topright {
+  top: 0 !important; right: 0 !important; width: 16px !important; height: 16px !important;
+  cursor: nesw-resize !important;
+}
+html.tt-floating-mode .tt-grip-bottomleft {
+  bottom: 0 !important; left: 0 !important; width: 16px !important; height: 16px !important;
+  cursor: nesw-resize !important;
+}
+html.tt-floating-mode .tt-grip-bottomright {
+  bottom: 0 !important; right: 0 !important; width: 16px !important; height: 16px !important;
+  cursor: nwse-resize !important;
 }
 `;
   const relocate = (parent, node, reference) => {
@@ -141,6 +182,30 @@ html.tt-floating-mode .tt-float-btn:hover {
     backdrop.id = 'tt-floating-backdrop';
     const header = document.createElement('div');
     header.id = 'tt-floating-header';
+    const shrinkBtn = document.createElement('button');
+    shrinkBtn.className = 'tt-float-btn';
+    shrinkBtn.textContent = '−';
+    shrinkBtn.title = 'Reducir tamaño';
+    shrinkBtn.setAttribute('aria-label', 'Reducir tamaño');
+    if (typeof shrinkBtn.addEventListener === 'function') {
+      shrinkBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.chrome?.webview?.postMessage?.({ channel: 'window:scale-floating', delta: -0.2 });
+      });
+    }
+
+    const enlargeBtn = document.createElement('button');
+    enlargeBtn.className = 'tt-float-btn';
+    enlargeBtn.textContent = '+';
+    enlargeBtn.title = 'Aumentar tamaño';
+    enlargeBtn.setAttribute('aria-label', 'Aumentar tamaño');
+    if (typeof enlargeBtn.addEventListener === 'function') {
+      enlargeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.chrome?.webview?.postMessage?.({ channel: 'window:scale-floating', delta: 0.2 });
+      });
+    }
+
     const restoreBtn = document.createElement('button');
     restoreBtn.className = 'tt-float-btn';
     restoreBtn.textContent = '⤢';
@@ -156,6 +221,8 @@ html.tt-floating-mode .tt-float-btn:hover {
         }
       });
     }
+    header.appendChild(shrinkBtn);
+    header.appendChild(enlargeBtn);
     header.appendChild(restoreBtn);
     if (typeof header.addEventListener === 'function') {
       header.addEventListener('mousedown', (e) => {
@@ -167,18 +234,53 @@ html.tt-floating-mode .tt-float-btn:hover {
     const playing = !video.paused;
     const initialTime = video.currentTime;
     const initialVideo = video;
+    const grips = [];
+    const directions = ['top', 'bottom', 'left', 'right', 'topleft', 'topright', 'bottomleft', 'bottomright'];
+    for (const dir of directions) {
+      const grip = document.createElement('div');
+      grip.className = 'tt-resize-grip tt-grip-' + dir;
+      grip.setAttribute('data-direction', dir);
+      if (typeof grip.addEventListener === 'function') {
+        grip.addEventListener('mousedown', (e) => {
+          if (e.button === 0) {
+            e.preventDefault();
+            e.stopPropagation();
+            window.chrome?.webview?.postMessage?.({
+              channel: 'window:resize',
+              direction: dir
+            });
+          }
+        });
+      }
+      grips.push(grip);
+    }
+
+    const onWheel = (e) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 0.15 : -0.15;
+        window.chrome?.webview?.postMessage?.({ channel: 'window:scale-floating', delta });
+      }
+    };
+    if (typeof window.addEventListener === 'function') {
+      window.addEventListener('wheel', onWheel, { passive: false });
+    }
+
     try {
       if (document.head) document.head.appendChild(css);
       else document.documentElement?.appendChild(css);
       document.body.appendChild(backdrop);
       document.body.appendChild(header);
+      for (const grip of grips) {
+        document.body.appendChild(grip);
+      }
       // If a browser lacks moveBefore, a legacy DOM move may restart video.
       // Restore its playing state below if this happens; never hide failure.
       relocate(document.body, player, null);
       player.classList.add('tt-floating-player');
       document.documentElement.classList.add('tt-floating-mode');
       document.getElementById('tizentube-native-pip')?.setAttribute('aria-pressed', 'true');
-      state = { parent, reference, player, previousStyle, css, backdrop, header };
+      state = { parent, reference, player, previousStyle, css, backdrop, header, grips, onWheel };
       if (player.querySelector('video.html5-main-video') !== initialVideo)
         throw new Error('YouTube replaced the video element while floating');
       if (video.paused && playing) {
@@ -200,6 +302,14 @@ html.tt-floating-mode .tt-float-btn:hover {
     document.getElementById('tt-floating-player-styles')?.remove();
     document.getElementById('tt-floating-header')?.remove();
     document.getElementById('tizentube-native-pip')?.setAttribute('aria-pressed', 'false');
+    if (savedState?.grips) {
+      for (const grip of savedState.grips) {
+        try { grip?.remove?.(); } catch (_) {}
+      }
+    }
+    if (savedState?.onWheel && typeof window.removeEventListener === 'function') {
+      window.removeEventListener('wheel', savedState.onWheel);
+    }
 
     const player = savedState?.player || document.getElementById('movie_player');
     if (player) {
