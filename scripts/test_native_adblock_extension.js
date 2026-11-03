@@ -32,12 +32,10 @@ try {
   globalThis.window = { __TT_EXTERNAL_ADBLOCK__: 'uBlock Origin Lite' };
   const fallback = new AdBlockBase();
   fallback.install();
-  assert.equal(fallback.isHooked, false, 'do not run competing interceptors');
-  assert.equal(fallback.options.enabled, false);
-  fallback.setEnabled(true);
-  assert.equal(fallback.options.enabled, false, 'settings cannot silently re-enable legacy filters');
+  assert.equal(fallback.isHooked, true, 'runs structural and cosmetic interceptors');
+  assert.equal(fallback.options.enabled, true);
 } finally {
   if (saved === undefined) delete globalThis.window;
   else globalThis.window = saved;
 }
-console.log('Pinned open-source MV3 extension and no conflicting legacy filters: 14/14 PASS');
+console.log('Pinned open-source MV3 extension and integrated ad filters: 14/14 PASS');

@@ -47,6 +47,61 @@ export const SPONSORBLOCK_CATEGORIES = {
   }
 };
 
+function sha256Sync(ascii) {
+  function rightRotate(value, amount) {
+    return (value >>> amount) | (value << (32 - amount));
+  }
+  const mathPow = Math.pow;
+  const maxWord = mathPow(2, 32);
+  const lengthProperty = 'length';
+  let result = '';
+  const words = [];
+  const asciiBitLength = ascii[lengthProperty] * 8;
+  const hash = [];
+  const k = [];
+  let primeCounter = 0;
+  for (let candidate = 2; primeCounter < 64; candidate++) {
+    let isComposite = false;
+    for (let i = 2; i * i <= candidate; i++) {
+      if (candidate % i === 0) { isComposite = true; break; }
+    }
+    if (!isComposite) {
+      hash[primeCounter] = (mathPow(candidate, 0.5) * maxWord) | 0;
+      k[primeCounter++] = (mathPow(candidate, 1 / 3) * maxWord) | 0;
+    }
+  }
+  ascii += '\x80';
+  while (ascii[lengthProperty] % 64 - 56) ascii += '\x00';
+  for (let i = 0; i < ascii[lengthProperty]; i++) {
+    const j = ascii.charCodeAt(i);
+    if (j >> 8) return '';
+    words[i >> 2] |= j << ((3 - i) % 4) * 8;
+  }
+  words[words[lengthProperty]] = ((asciiBitLength / maxWord) | 0);
+  words[words[lengthProperty]] = asciiBitLength;
+  for (let j = 0; j < words[lengthProperty];) {
+    const w = words.slice(j, j += 16);
+    const oldHash = hash.slice(0, 8);
+    for (let i = 0; i < 64; i++) {
+      const w15 = w[i - 15], w2 = w[i - 2], a = hash[0], e = hash[4];
+      const temp1 = hash[7] + (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25)) + ((e & hash[5]) ^ ((~e) & hash[6])) + k[i] + (w[i] = (i < 16) ? w[i] : (w[i - 16] + (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3)) + w[i - 7] + (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))) | 0);
+      const temp2 = (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22)) + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+      hash[7] = hash[6]; hash[6] = hash[5]; hash[5] = hash[4];
+      hash[4] = (hash[3] + temp1) | 0;
+      hash[3] = hash[2]; hash[2] = hash[1]; hash[1] = hash[0];
+      hash[0] = (temp1 + temp2) | 0;
+    }
+    for (let i = 0; i < 8; i++) hash[i] = (hash[i] + oldHash[i]) | 0;
+  }
+  for (let i = 0; i < 8; i++) {
+    for (let j = 3; j >= 0; j--) {
+      const b = (hash[i] >> (j * 8)) & 255;
+      result += ((b < 16) ? '0' : '') + b.toString(16);
+    }
+  }
+  return result;
+}
+
 export class SponsorBlockBase {
   constructor(options = {}) {
     this.options = {
@@ -183,6 +238,7 @@ export class SponsorBlockBase {
         if (typeof fetch === 'undefined') return [];
 
         const catsParam = encodeURIComponent(JSON.stringify(this.options.categories));
+        const hashPrefix = sha256Sync(videoId).slice(0, 4);
         const urlsToTry = [
           this.options.apiUrl,
           ...(Array.isArray(this.options.fallbackApiUrls) ? this.options.fallbackApiUrls : [])
@@ -190,7 +246,7 @@ export class SponsorBlockBase {
 
         for (let i = 0; i < urlsToTry.length; i++) {
           const baseUrl = urlsToTry[i];
-          const url = `${baseUrl}/skipSegments?videoID=${encodeURIComponent(videoId)}&categories=${catsParam}`;
+          const url = `${baseUrl}/skipSegments/${hashPrefix}?categories=${catsParam}`;
 
           const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
           const timeoutMs = this.options.timeoutMs || 4000;
@@ -234,7 +290,15 @@ export class SponsorBlockBase {
               return [];
             }
 
-            const segments = data
+            let rawList = [];
+            const matched = data.find(item => item && item.videoID === videoId);
+            if (matched && Array.isArray(matched.segments)) {
+              rawList = matched.segments;
+            } else if (data.length > 0 && Array.isArray(data[0].segment)) {
+              rawList = data;
+            }
+
+            const segments = rawList
               .filter(item => Array.isArray(item.segment) && item.segment.length === 2 && !isNaN(item.segment[0]) && !isNaN(item.segment[1]))
               .map(item => {
                 const catInfo = SPONSORBLOCK_CATEGORIES[item.category] || {

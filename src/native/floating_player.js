@@ -52,6 +52,25 @@ html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-cards-teaser,
 html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-paid-content-overlay {
   display: none !important;
 }
+html.tt-floating-mode #tt-floating-header {
+  position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important;
+  height: 34px !important; z-index: 2147483648 !important;
+  display: flex !important; align-items: center !important; justify-content: flex-end !important;
+  padding: 0 10px !important; background: linear-gradient(180deg, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0) 100%) !important;
+  opacity: 0 !important; transition: opacity 0.2s ease !important; cursor: move !important;
+}
+html.tt-floating-mode:hover #tt-floating-header,
+html.tt-floating-mode #tt-floating-header:hover {
+  opacity: 1 !important;
+}
+html.tt-floating-mode .tt-float-btn {
+  background: rgba(255,255,255,0.15) !important; border: none !important; color: #fff !important;
+  cursor: pointer !important; padding: 2px 8px !important; border-radius: 4px !important;
+  font-size: 13px !important; line-height: 20px !important; display: inline-flex !important;
+}
+html.tt-floating-mode .tt-float-btn:hover {
+  background: rgba(255,255,255,0.3) !important;
+}
 `;
   const relocate = (parent, node, reference) => {
     // Element.moveBefore preserves video/iframe playback on Chromium 133+;
@@ -120,6 +139,31 @@ html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-paid-content-
     css.textContent = style;
     const backdrop = document.createElement('div');
     backdrop.id = 'tt-floating-backdrop';
+    const header = document.createElement('div');
+    header.id = 'tt-floating-header';
+    const restoreBtn = document.createElement('button');
+    restoreBtn.className = 'tt-float-btn';
+    restoreBtn.textContent = '⤢';
+    restoreBtn.title = 'Restaurar ventana (F9)';
+    restoreBtn.setAttribute('aria-label', 'Restaurar');
+    if (typeof restoreBtn.addEventListener === 'function') {
+      restoreBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof window !== 'undefined' && window.chrome?.webview?.postMessage) {
+          window.chrome.webview.postMessage({ channel: 'window:restore-floating' });
+        } else {
+          stop();
+        }
+      });
+    }
+    header.appendChild(restoreBtn);
+    if (typeof header.addEventListener === 'function') {
+      header.addEventListener('mousedown', (e) => {
+        if (e.button === 0 && e.target === header) {
+          window.chrome?.webview?.postMessage?.({ channel: 'window:drag' });
+        }
+      });
+    }
     const playing = !video.paused;
     const initialTime = video.currentTime;
     const initialVideo = video;
@@ -127,13 +171,14 @@ html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-paid-content-
       if (document.head) document.head.appendChild(css);
       else document.documentElement?.appendChild(css);
       document.body.appendChild(backdrop);
+      document.body.appendChild(header);
       // If a browser lacks moveBefore, a legacy DOM move may restart video.
       // Restore its playing state below if this happens; never hide failure.
       relocate(document.body, player, null);
       player.classList.add('tt-floating-player');
       document.documentElement.classList.add('tt-floating-mode');
       document.getElementById('tizentube-native-pip')?.setAttribute('aria-pressed', 'true');
-      state = { parent, reference, player, previousStyle, css, backdrop };
+      state = { parent, reference, player, previousStyle, css, backdrop, header };
       if (player.querySelector('video.html5-main-video') !== initialVideo)
         throw new Error('YouTube replaced the video element while floating');
       if (video.paused && playing) {
@@ -153,6 +198,7 @@ html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-paid-content-
     document.documentElement.classList.remove('tt-floating-mode');
     document.getElementById('tt-floating-backdrop')?.remove();
     document.getElementById('tt-floating-player-styles')?.remove();
+    document.getElementById('tt-floating-header')?.remove();
     document.getElementById('tizentube-native-pip')?.setAttribute('aria-pressed', 'false');
 
     const player = savedState?.player || document.getElementById('movie_player');
@@ -176,6 +222,7 @@ html.tt-floating-mode body > #movie_player.tt-floating-player .ytp-paid-content-
     }
     savedState?.backdrop?.remove();
     savedState?.css?.remove();
+    savedState?.header?.remove();
     // Dispatch window resize so YouTube player recalculates internal dimensions
     // rather than staying clipped/miniaturized in the corner.
     try { window.dispatchEvent(new Event('resize')); } catch (_) {}

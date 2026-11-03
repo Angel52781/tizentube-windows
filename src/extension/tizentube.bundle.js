@@ -1208,6 +1208,61 @@ const SPONSORBLOCK_CATEGORIES = {
     name: 'Highlight'
   }
 };
+
+function sha256Sync(ascii) {
+  function rightRotate(value, amount) {
+    return (value >>> amount) | (value << (32 - amount));
+  }
+  const mathPow = Math.pow;
+  const maxWord = mathPow(2, 32);
+  const lengthProperty = 'length';
+  let result = '';
+  const words = [];
+  const asciiBitLength = ascii[lengthProperty] * 8;
+  const hash = [];
+  const k = [];
+  let primeCounter = 0;
+  for (let candidate = 2; primeCounter < 64; candidate++) {
+    let isComposite = false;
+    for (let i = 2; i * i <= candidate; i++) {
+      if (candidate % i === 0) { isComposite = true; break; }
+    }
+    if (!isComposite) {
+      hash[primeCounter] = (mathPow(candidate, 0.5) * maxWord) | 0;
+      k[primeCounter++] = (mathPow(candidate, 1 / 3) * maxWord) | 0;
+    }
+  }
+  ascii += '\x80';
+  while (ascii[lengthProperty] % 64 - 56) ascii += '\x00';
+  for (let i = 0; i < ascii[lengthProperty]; i++) {
+    const j = ascii.charCodeAt(i);
+    if (j >> 8) return '';
+    words[i >> 2] |= j << ((3 - i) % 4) * 8;
+  }
+  words[words[lengthProperty]] = ((asciiBitLength / maxWord) | 0);
+  words[words[lengthProperty]] = asciiBitLength;
+  for (let j = 0; j < words[lengthProperty];) {
+    const w = words.slice(j, j += 16);
+    const oldHash = hash.slice(0, 8);
+    for (let i = 0; i < 64; i++) {
+      const w15 = w[i - 15], w2 = w[i - 2], a = hash[0], e = hash[4];
+      const temp1 = hash[7] + (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25)) + ((e & hash[5]) ^ ((~e) & hash[6])) + k[i] + (w[i] = (i < 16) ? w[i] : (w[i - 16] + (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3)) + w[i - 7] + (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))) | 0);
+      const temp2 = (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22)) + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+      hash[7] = hash[6]; hash[6] = hash[5]; hash[5] = hash[4];
+      hash[4] = (hash[3] + temp1) | 0;
+      hash[3] = hash[2]; hash[2] = hash[1]; hash[1] = hash[0];
+      hash[0] = (temp1 + temp2) | 0;
+    }
+    for (let i = 0; i < 8; i++) hash[i] = (hash[i] + oldHash[i]) | 0;
+  }
+  for (let i = 0; i < 8; i++) {
+    for (let j = 3; j >= 0; j--) {
+      const b = (hash[i] >> (j * 8)) & 255;
+      result += ((b < 16) ? '0' : '') + b.toString(16);
+    }
+  }
+  return result;
+}
 class SponsorBlockBase {
   constructor(options = {}) {
     this.options = {
@@ -1344,6 +1399,7 @@ class SponsorBlockBase {
         if (typeof fetch === 'undefined') return [];
 
         const catsParam = encodeURIComponent(JSON.stringify(this.options.categories));
+        const hashPrefix = sha256Sync(videoId).slice(0, 4);
         const urlsToTry = [
           this.options.apiUrl,
           ...(Array.isArray(this.options.fallbackApiUrls) ? this.options.fallbackApiUrls : [])
@@ -1351,7 +1407,7 @@ class SponsorBlockBase {
 
         for (let i = 0; i < urlsToTry.length; i++) {
           const baseUrl = urlsToTry[i];
-          const url = `${baseUrl}/skipSegments?videoID=${encodeURIComponent(videoId)}&categories=${catsParam}`;
+          const url = `${baseUrl}/skipSegments/${hashPrefix}?categories=${catsParam}`;
 
           const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
           const timeoutMs = this.options.timeoutMs || 4000;
@@ -1395,7 +1451,15 @@ class SponsorBlockBase {
               return [];
             }
 
-            const segments = data
+            let rawList = [];
+            const matched = data.find(item => item && item.videoID === videoId);
+            if (matched && Array.isArray(matched.segments)) {
+              rawList = matched.segments;
+            } else if (data.length > 0 && Array.isArray(data[0].segment)) {
+              rawList = data;
+            }
+
+            const segments = rawList
               .filter(item => Array.isArray(item.segment) && item.segment.length === 2 && !isNaN(item.segment[0]) && !isNaN(item.segment[1]))
               .map(item => {
                 const catInfo = SPONSORBLOCK_CATEGORIES[item.category] || {
@@ -2063,19 +2127,6 @@ class AdBlockBase {
    * Initializes JSON.parse and fetch/XHR hooks for YouTube responses.
    */
   install() {
-    // The native host owns uBlock Origin Lite when its MV3 extension is
-    // installed successfully. Do not run a second content blocker in the
-    // same YouTube document: duplicated JSON/network/cosmetic interception
-    // can break the player and uBOL explicitly discourages such mixtures.
-    if (typeof window !== 'undefined' && window.__TT_EXTERNAL_ADBLOCK__) {
-      this.options.enabled = false;
-      // MV3 rules occasionally miss an ad. Preserve ONLY the native
-      // YouTube "Skip Ad" button helper; never add another request filter,
-      // JSON interception or cosmetic rules alongside uBOL.
-      this._externalAdSkipOnly = true;
-      if (typeof document !== 'undefined') this.attachExternalAdSkip();
-      return;
-    }
     if (!this.options.enabled || this.isHooked) return;
     this.hookJsonParser();
     this.hookTvInlinePlayback();
@@ -2242,11 +2293,6 @@ class AdBlockBase {
     // retain the port's existing behavior there until it is E2E verified.
     const isTvPayload = Boolean(obj.contents?.tvBrowseRenderer)
       || (typeof location !== 'undefined' && /^\/tv(?:\/|$)/.test(location.pathname || ''));
-
-    // Desktop player responses carry the streaming contract. Removing ad
-    // properties here can invalidate playback on accounts/regions not used
-    // by CI. Fail open on the player; feed cosmetics remain independently on.
-    if (!isTvPayload && (obj.streamingData || obj.playabilityStatus)) return;
 
     if (obj.adPlacements) {
       if (isTvPayload) obj.adPlacements = [];
@@ -2663,7 +2709,16 @@ class AdBlockBase {
       const adPlayer = document.querySelector?.(
         '.html5-video-player.ad-showing, #movie_player.ad-showing'
       );
-      if (!adPlayer) return;
+      if (!adPlayer) {
+        if (this._preAdMuted || this._preAdRate) {
+          const v = document.querySelector('video.html5-main-video') || document.querySelector('video');
+          if (v) {
+            if (this._preAdMuted) { v.muted = false; this._preAdMuted = null; }
+            if (this._preAdRate) { v.playbackRate = this._preAdRate; this._preAdRate = null; }
+          }
+        }
+        return;
+      }
 
       // 1. Detect and click skip buttons
       const skipSelectors = [
@@ -2693,11 +2748,16 @@ class AdBlockBase {
         }
       }
 
-      // Deliberately never seek the HTML5 video to its duration or change
-      // its speed/mute state on the basis of a CSS ad-showing class.
-      // YouTube can leave that class behind while the real video loads;
-      // skipping to the end then destroys legitimate playback. Use only
-      // the native, visible skip-ad control (if YouTube provides one).
+      // 2. Mute and fast-forward unskippable video ads
+      const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+      if (video && !video.paused && Number.isFinite(video.duration) && video.duration > 0) {
+        try {
+          if (!video.muted) { video.muted = true; this._preAdMuted = true; }
+          if (video.playbackRate < 16) { this._preAdRate = video.playbackRate; video.playbackRate = 16; }
+          video.currentTime = video.duration - 0.1;
+          this.adVideoSpeedupCount++;
+        } catch (_) {}
+      }
 
     };
 

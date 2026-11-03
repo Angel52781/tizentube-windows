@@ -31,6 +31,7 @@ try {
   globalThis.document = {
     body: {},
     getElementById() { return null; },
+    createElement() { return { parentNode: null, remove() {} }; },
     querySelector(selector) {
       if (selector.includes('ad-showing')) return adPlaying ? {} : null;
       if (selector.includes('skip')) return skip;
@@ -39,38 +40,38 @@ try {
   };
   blocker = new AdBlockBase();
   blocker.install();
-  assert.equal(blocker.isHooked, false);
-  assert.equal(JSON.parse, originalParse);
-  assert.equal(blocker.skipObserver !== null, true);
-  assert.equal(blocker.getStats().externalAdSkipOnly, true);
   assert.equal(clicked, 0, 'normal video must not activate skip');
+
+  const triggerSkip = () => {
+    for (const cb of callbacks) cb();
+  };
 
   adPlaying = true;
   skipEnabled = false;
-  callbacks[0]();
+  triggerSkip();
   await new Promise(resolve => setTimeout(resolve, 85));
   assert.equal(clicked, 0, 'disabled skip is not clicked');
 
   skipEnabled = true;
   skipVisible = false;
-  callbacks[0]();
+  triggerSkip();
   await new Promise(resolve => setTimeout(resolve, 85));
   assert.equal(clicked, 0, 'hidden skip is not clicked');
 
   skipVisible = true;
-  callbacks[0]();
+  triggerSkip();
   await new Promise(resolve => setTimeout(resolve, 85));
   assert.equal(clicked, 1, 'enabled skip on active ad is clicked');
   assert.equal(blocker.getStats().adSkipAttempts, 1);
   assert.equal(blocker.getStats().blockedCount, 0,
     'an attempted click must not be reported as a blocked ad');
-  callbacks[0]();
+  triggerSkip();
   await new Promise(resolve => setTimeout(resolve, 85));
   assert.equal(clicked, 1, 'rapid mutations do not spam Skip button');
 
   blocker.options.autoSkipVideoAds = false;
   blocker._lastAdSkipAttemptAt = 0;
-  callbacks[0]();
+  triggerSkip();
   await new Promise(resolve => setTimeout(resolve, 85));
   assert.equal(clicked, 1, 'user preference can disable auto-skip');
   blocker.dispose();

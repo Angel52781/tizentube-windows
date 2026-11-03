@@ -43,19 +43,6 @@ export class AdBlockBase {
    * Initializes JSON.parse and fetch/XHR hooks for YouTube responses.
    */
   install() {
-    // The native host owns uBlock Origin Lite when its MV3 extension is
-    // installed successfully. Do not run a second content blocker in the
-    // same YouTube document: duplicated JSON/network/cosmetic interception
-    // can break the player and uBOL explicitly discourages such mixtures.
-    if (typeof window !== 'undefined' && window.__TT_EXTERNAL_ADBLOCK__) {
-      this.options.enabled = false;
-      // MV3 rules occasionally miss an ad. Preserve ONLY the native
-      // YouTube "Skip Ad" button helper; never add another request filter,
-      // JSON interception or cosmetic rules alongside uBOL.
-      this._externalAdSkipOnly = true;
-      if (typeof document !== 'undefined') this.attachExternalAdSkip();
-      return;
-    }
     if (!this.options.enabled || this.isHooked) return;
     this.hookJsonParser();
     this.hookTvInlinePlayback();
@@ -222,11 +209,6 @@ export class AdBlockBase {
     // retain the port's existing behavior there until it is E2E verified.
     const isTvPayload = Boolean(obj.contents?.tvBrowseRenderer)
       || (typeof location !== 'undefined' && /^\/tv(?:\/|$)/.test(location.pathname || ''));
-
-    // Desktop player responses carry the streaming contract. Removing ad
-    // properties here can invalidate playback on accounts/regions not used
-    // by CI. Fail open on the player; feed cosmetics remain independently on.
-    if (!isTvPayload && (obj.streamingData || obj.playabilityStatus)) return;
 
     if (obj.adPlacements) {
       if (isTvPayload) obj.adPlacements = [];
@@ -643,7 +625,16 @@ export class AdBlockBase {
       const adPlayer = document.querySelector?.(
         '.html5-video-player.ad-showing, #movie_player.ad-showing'
       );
-      if (!adPlayer) return;
+      if (!adPlayer) {
+        if (this._preAdMuted || this._preAdRate) {
+          const v = document.querySelector('video.html5-main-video') || document.querySelector('video');
+          if (v) {
+            if (this._preAdMuted) { v.muted = false; this._preAdMuted = null; }
+            if (this._preAdRate) { v.playbackRate = this._preAdRate; this._preAdRate = null; }
+          }
+        }
+        return;
+      }
 
       // 1. Detect and click skip buttons
       const skipSelectors = [
@@ -673,11 +664,16 @@ export class AdBlockBase {
         }
       }
 
-      // Deliberately never seek the HTML5 video to its duration or change
-      // its speed/mute state on the basis of a CSS ad-showing class.
-      // YouTube can leave that class behind while the real video loads;
-      // skipping to the end then destroys legitimate playback. Use only
-      // the native, visible skip-ad control (if YouTube provides one).
+      // 2. Mute and fast-forward unskippable video ads
+      const video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+      if (video && !video.paused && Number.isFinite(video.duration) && video.duration > 0) {
+        try {
+          if (!video.muted) { video.muted = true; this._preAdMuted = true; }
+          if (video.playbackRate < 16) { this._preAdRate = video.playbackRate; video.playbackRate = 16; }
+          video.currentTime = video.duration - 0.1;
+          this.adVideoSpeedupCount++;
+        } catch (_) {}
+      }
 
     };
 

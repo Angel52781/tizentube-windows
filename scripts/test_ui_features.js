@@ -464,7 +464,7 @@ async function runAll() {
     assert.strictEqual(payload.playerAds, undefined);
     assert.strictEqual(payload.adSlots, undefined);
     assert.strictEqual(payload.adBreakHeartbeatParams, undefined);
-    assert.ok(Array.isArray(payload.playerResponse.adPlacements), 'desktop player response must remain intact');
+    assert.strictEqual(payload.playerResponse.adPlacements, undefined, 'desktop player adPlacements must be cleaned');
   });
 
   // Test 8: Settings Modal & Preferences Persistence

@@ -25,13 +25,16 @@ try {
   };
   globalThis.fetch = async url => {
     calls++;
-    assert.ok(url.includes('videoID=ifI_fwg55k8'));
+    assert.ok(url.includes('5f6b') || url.includes('videoID=ifI_fwg55k8'));
     return {
       ok: true,
       json: async () => [{
-        UUID: 'sponsor-test-uuid',
-        category: 'intro', actionType: 'skip',
-        segment: [0, 2.811777]
+        videoID: 'ifI_fwg55k8',
+        segments: [{
+          UUID: 'sponsor-test-uuid',
+          category: 'intro', actionType: 'skip',
+          segment: [0, 2.811777]
+        }]
       }]
     };
   };

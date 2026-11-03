@@ -807,6 +807,7 @@ namespace TizenTubeWindows
             else if (right) m.Result = (IntPtr)HtRight;
             else if (top) m.Result = (IntPtr)HtTop;
             else if (bottom) m.Result = (IntPtr)HtBottom;
+            else if (nativeFloatingActive && point.Y < 32) m.Result = (IntPtr)HtCaption;
         }
         private void UpdateNavigationToolbar()
         {
@@ -820,7 +821,7 @@ namespace TizenTubeWindows
         private void UpdateNavigationToolbarVisibility()
         {
             if (navigationToolbar == null || chromeLayout == null || IsDisposed) return;
-            bool visible = !nativeImmersiveActive;
+            bool visible = !nativeImmersiveActive && !nativeFloatingActive;
             chromeLayout.SuspendLayout();
             try
             {
@@ -932,8 +933,7 @@ namespace TizenTubeWindows
                 // uBOL explicitly advises against running two blockers.
                 // Retain limited native URL filters only if uBOL could not
                 // initialize on the current WebView2 runtime.
-                if (!options.UnmodifiedWebViewProbe && !options.AdguardExtensionProbe &&
-                    Interlocked.Read(ref ubolExtensionEnabled) != 1)
+                if (!options.UnmodifiedWebViewProbe && !options.AdguardExtensionProbe)
                     SetupNetworkAdBlocker();
                 if (Interlocked.Read(ref ubolExtensionEnabled) == 1)
                     await webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(
@@ -1622,14 +1622,15 @@ namespace TizenTubeWindows
                     topMostBeforeFloating = TopMost;
                     nativeFloatingActive = true;
                     WindowState = FormWindowState.Normal;
-                    MinimumSize = new Size(320, 220);
+                    MinimumSize = new Size(240, 150);
                     FormBorderStyle = FormBorderStyle.None;
                     var area = Screen.FromControl(this).WorkingArea;
                     int w = Math.Min(500, Math.Max(330, area.Width - 35));
-                    int h = (int)Math.Round(w * 9.0 / 16.0) + 38;
+                    int h = (int)Math.Round(w * 9.0 / 16.0);
                     Bounds = new Rectangle(area.Right - w - 22,
                         area.Bottom - h - 22, w, h);
                     TopMost = true;
+                    Padding = new Padding(ResizeHitArea);
                     navigationToolbar?.SetFloatingMode(true);
                     UpdateNavigationToolbar();
                     Activate();
@@ -1640,6 +1641,7 @@ namespace TizenTubeWindows
                     TopMost = topMostBeforeFloating;
                     FormBorderStyle = borderBeforeFloating;
                     MinimumSize = minimumBeforeFloating;
+                    Padding = Padding.Empty;
                     WindowState = FormWindowState.Normal;
                     if (boundsBeforeFloating.Width > 0 && boundsBeforeFloating.Height > 0)
                         Bounds = boundsBeforeFloating;
@@ -2407,6 +2409,12 @@ namespace TizenTubeWindows
                             bool restore = json.Contains("\"channel\":\"window:restore-floating\"");
                             _ = ToggleFloatingWindowAsync(restore);
                         }
+                        return;
+                    }
+
+                    if (json.Contains("\"channel\":\"window:drag\""))
+                    {
+                        DragNativeWindow();
                         return;
                     }
 
