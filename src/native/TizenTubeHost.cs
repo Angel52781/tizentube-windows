@@ -1169,6 +1169,7 @@ namespace TizenTubeWindows
             }
             catch (Exception ex)
             {
+                if (IsDisposed || Disposing) return;
                 Console.Error.WriteLine($"[ERROR] WebView2 initialization failed: {ex}");
                 Debug.WriteLine($"[ERROR] WebView2 initialization failed: {ex}");
                 this.ExitCode = 2;
