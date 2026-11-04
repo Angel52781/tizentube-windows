@@ -4,7 +4,7 @@
 
 [Setup]
 AppName=TizenTube
-AppVersion=0.1.0-preview.26
+AppVersion=0.1.0-preview.27
 AppPublisher=TizenTube Windows Contributors
 AppPublisherURL=https://github.com/Angel52781/tizentube-windows
 AppSupportURL=https://github.com/Angel52781/tizentube-windows/issues

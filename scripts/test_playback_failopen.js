@@ -16,7 +16,7 @@ try {
     body: {},
     querySelector(selector) {
       if (selector === 'video.html5-main-video' || selector === 'video') return video;
-      if (selector === '#movie_player') return {
+      if (selector === '#movie_player' || selector.includes('ad-showing')) return {
         classList: { contains: className => className === 'ad-showing' }
       };
       return null;

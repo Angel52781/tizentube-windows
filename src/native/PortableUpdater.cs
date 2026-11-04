@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 // GPL-3.0-only. Optional, explicit, verified updates for the portable Windows
 // distribution. Never auto-install an Action artifact or an untagged branch.
 using System;
@@ -18,7 +19,27 @@ namespace TizenTubeWindows
 {
     internal static class PortableUpdater
     {
-        private const int CurrentPreview = 25;
+        public static int CurrentPreview
+        {
+            get
+            {
+                try
+                {
+                    var infoVer = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+                    if (!string.IsNullOrEmpty(infoVer))
+                    {
+                        var match = Regex.Match(infoVer, @"preview\.(\d+)");
+                        if (match.Success && int.TryParse(match.Groups[1].Value, out int v))
+                            return v;
+                    }
+                    var asmVer = Assembly.GetExecutingAssembly().GetName().Version;
+                    if (asmVer != null && asmVer.Revision > 0)
+                        return asmVer.Revision;
+                }
+                catch { }
+                return 27; // fallback para preview.27
+            }
+        }
         private const string Api = "https://api.github.com/repos/Angel52781/tizentube-windows/releases?per_page=30";
         private const string ZipPrefix = "TizenTube-Windows-x64-v0.1.0-preview.";
         private const string PortableFolder = "TizenTube-Windows-x64";
@@ -280,7 +301,7 @@ namespace TizenTubeWindows
                 string relative = Path.GetRelativePath(install, source);
                 string target = Path.Combine(destination, relative);
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                File.Copy(source, target, false);
+                RobustFileCopy(source, target, false);
             }
             if (!File.Exists(Path.Combine(destination, "TizenTubeHost.exe")))
                 throw new InvalidDataException("Staged updater lacks native executable");
@@ -339,13 +360,13 @@ namespace TizenTubeWindows
                         string rel = Path.GetRelativePath(sourceDir, file);
                         string dest = Path.Combine(targetDir, rel);
                         Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-                        File.Copy(file, dest, true);
+                        RobustFileCopy(file, dest, true);
                     }
                 }
                 else if (File.Exists(sourceDir))
                 {
                     string dest = Path.Combine(targetDir, "TizenTubeHost.exe");
-                    File.Copy(sourceDir, dest, true);
+                    RobustFileCopy(sourceDir, dest, true);
                 }
 
                 installedExe = Path.Combine(targetDir, "TizenTubeHost.exe");
@@ -390,7 +411,7 @@ namespace TizenTubeWindows
                     if (key != null)
                     {
                         key.SetValue("DisplayName", "TizenTube");
-                        key.SetValue("DisplayVersion", "0.1.0-preview.26");
+                        key.SetValue("DisplayVersion", "0.1.0-preview.27");
                         key.SetValue("Publisher", "TizenTube Windows Contributors");
                         key.SetValue("DisplayIcon", exePath);
                         key.SetValue("InstallLocation", installDir);
@@ -479,6 +500,10 @@ namespace TizenTubeWindows
                         if (!original.WaitForExit(60_000)) return 6;
                 }
                 catch (ArgumentException) { /* Already closed */ }
+
+                TerminateWebView2Processes(pid, install);
+                System.Threading.Thread.Sleep(300);
+
                 string parent = Directory.GetParent(Path.GetFullPath(install)).FullName;
                 string nonce = Guid.NewGuid().ToString("N");
                 stage = Path.Combine(parent, ".tizentube-stage-" + nonce);
@@ -489,11 +514,11 @@ namespace TizenTubeWindows
                 if (!File.Exists(Path.Combine(root, "TizenTubeHost.exe")) ||
                     !File.Exists(Path.Combine(root, "LEEME_INSTALACION.md")))
                     return 4;
-                Directory.Move(install, backup);
-                try { Directory.Move(root, install); }
+                RobustDirectoryMove(install, backup);
+                try { RobustDirectoryMove(root, install); }
                 catch
                 {
-                    Directory.Move(backup, install);
+                    try { RobustDirectoryMove(backup, install); } catch { }
                     throw;
                 }
                 try
@@ -507,8 +532,8 @@ namespace TizenTubeWindows
                     // Process launch can fail after a successful directory
                     // swap. Keep the previous installation usable.
                     string failed = Path.Combine(parent, ".tizentube-failed-" + nonce);
-                    Directory.Move(install, failed);
-                    Directory.Move(backup, install);
+                    try { RobustDirectoryMove(install, failed); } catch { }
+                    try { RobustDirectoryMove(backup, install); } catch { }
                     throw;
                 }
                 // Keep backup as a reversible rollback rather than silently
@@ -569,6 +594,140 @@ namespace TizenTubeWindows
             {
                 try { Directory.Delete(scratch, recursive: true); } catch { }
             }
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool Process32First(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool Process32Next(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr hObject);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
+        private struct PROCESSENTRY32
+        {
+            public uint dwSize;
+            public uint cntUsage;
+            public uint th32ProcessID;
+            public IntPtr th32DefaultHeapID;
+            public uint th32ModuleID;
+            public uint cntThreads;
+            public uint th32ParentProcessID;
+            public int pcPriClassBase;
+            public uint dwFlags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+            public string szExeFile;
+        }
+
+        private const uint TH32CS_SNAPPROCESS = 0x00000002;
+
+        private static void TerminateWebView2Processes(int parentPid, string installDir)
+        {
+            try
+            {
+                var targetPids = new System.Collections.Generic.HashSet<int>();
+                if (parentPid > 0)
+                {
+                    try
+                    {
+                        IntPtr snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+                        if (snap != IntPtr.Zero && snap != (IntPtr)(-1))
+                        {
+                            try
+                            {
+                                var pe = new PROCESSENTRY32();
+                                pe.dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32));
+                                if (Process32First(snap, ref pe))
+                                {
+                                    do
+                                    {
+                                        if (pe.th32ParentProcessID == (uint)parentPid)
+                                        {
+                                            targetPids.Add((int)pe.th32ProcessID);
+                                        }
+                                    } while (Process32Next(snap, ref pe));
+                                }
+                            }
+                            finally
+                            {
+                                CloseHandle(snap);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                foreach (var proc in Process.GetProcessesByName("msedgewebview2"))
+                {
+                    try
+                    {
+                        bool shouldKill = targetPids.Contains(proc.Id);
+                        if (!shouldKill)
+                        {
+                            try
+                            {
+                                string exePath = proc.MainModule?.FileName;
+                                if (!string.IsNullOrEmpty(exePath) && exePath.StartsWith(installDir, StringComparison.OrdinalIgnoreCase))
+                                    shouldKill = true;
+                            }
+                            catch { }
+                        }
+
+                        if (shouldKill)
+                        {
+                            proc.Kill();
+                            proc.WaitForExit(2000);
+                        }
+                    }
+                    catch { }
+                    finally
+                    {
+                        proc.Dispose();
+                    }
+                }
+            }
+            catch { }
+        }
+
+        private static void RobustDirectoryMove(string source, string destination, int maxRetries = 5, int delayMs = 300)
+        {
+            for (int i = 0; i < maxRetries; i++)
+            {
+                try
+                {
+                    Directory.Move(source, destination);
+                    return;
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    if (i == maxRetries - 1) throw;
+                    System.Threading.Thread.Sleep(delayMs);
+                }
+            }
+            Directory.Move(source, destination);
+        }
+
+        private static void RobustFileCopy(string source, string destination, bool overwrite, int maxRetries = 5, int delayMs = 300)
+        {
+            for (int i = 0; i < maxRetries; i++)
+            {
+                try
+                {
+                    File.Copy(source, destination, overwrite);
+                    return;
+                }
+                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+                {
+                    if (i == maxRetries - 1) throw;
+                    System.Threading.Thread.Sleep(delayMs);
+                }
+            }
+            File.Copy(source, destination, overwrite);
         }
     }
 }
