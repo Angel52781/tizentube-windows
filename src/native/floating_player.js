@@ -8,6 +8,7 @@
   'use strict';
   if (window.__ttFloating) return;
   let state = null;
+  let activeResize = null;
   const style = `
 html.tt-floating-mode, html.tt-floating-mode body { overflow: hidden !important; }
 html.tt-floating-mode #tt-floating-backdrop {
@@ -79,21 +80,22 @@ html.tt-floating-mode .tt-resize-grip {
   pointer-events: auto !important;
   background: transparent !important;
   user-select: none !important;
+  touch-action: none !important;
 }
 html.tt-floating-mode .tt-grip-top {
-  top: 0 !important; left: 16px !important; right: 16px !important; height: 10px !important;
+  top: 0 !important; left: 16px !important; right: 16px !important; height: 12px !important;
   cursor: ns-resize !important;
 }
 html.tt-floating-mode .tt-grip-bottom {
-  bottom: 0 !important; left: 16px !important; right: 16px !important; height: 10px !important;
+  bottom: 0 !important; left: 16px !important; right: 16px !important; height: 12px !important;
   cursor: ns-resize !important;
 }
 html.tt-floating-mode .tt-grip-left {
-  left: 0 !important; top: 16px !important; bottom: 16px !important; width: 10px !important;
+  left: 0 !important; top: 16px !important; bottom: 16px !important; width: 12px !important;
   cursor: ew-resize !important;
 }
 html.tt-floating-mode .tt-grip-right {
-  right: 0 !important; top: 16px !important; bottom: 16px !important; width: 10px !important;
+  right: 0 !important; top: 16px !important; bottom: 16px !important; width: 12px !important;
   cursor: ew-resize !important;
 }
 html.tt-floating-mode .tt-grip-topleft {
@@ -182,30 +184,6 @@ html.tt-floating-mode .tt-grip-bottomright {
     backdrop.id = 'tt-floating-backdrop';
     const header = document.createElement('div');
     header.id = 'tt-floating-header';
-    const shrinkBtn = document.createElement('button');
-    shrinkBtn.className = 'tt-float-btn';
-    shrinkBtn.textContent = '−';
-    shrinkBtn.title = 'Reducir tamaño';
-    shrinkBtn.setAttribute('aria-label', 'Reducir tamaño');
-    if (typeof shrinkBtn.addEventListener === 'function') {
-      shrinkBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        window.chrome?.webview?.postMessage?.({ channel: 'window:scale-floating', delta: -0.2 });
-      });
-    }
-
-    const enlargeBtn = document.createElement('button');
-    enlargeBtn.className = 'tt-float-btn';
-    enlargeBtn.textContent = '+';
-    enlargeBtn.title = 'Aumentar tamaño';
-    enlargeBtn.setAttribute('aria-label', 'Aumentar tamaño');
-    if (typeof enlargeBtn.addEventListener === 'function') {
-      enlargeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        window.chrome?.webview?.postMessage?.({ channel: 'window:scale-floating', delta: 0.2 });
-      });
-    }
-
     const restoreBtn = document.createElement('button');
     restoreBtn.className = 'tt-float-btn';
     restoreBtn.textContent = '⤢';
@@ -221,8 +199,6 @@ html.tt-floating-mode .tt-grip-bottomright {
         }
       });
     }
-    header.appendChild(shrinkBtn);
-    header.appendChild(enlargeBtn);
     header.appendChild(restoreBtn);
     if (typeof header.addEventListener === 'function') {
       header.addEventListener('mousedown', (e) => {
@@ -241,16 +217,49 @@ html.tt-floating-mode .tt-grip-bottomright {
       grip.className = 'tt-resize-grip tt-grip-' + dir;
       grip.setAttribute('data-direction', dir);
       if (typeof grip.addEventListener === 'function') {
-        grip.addEventListener('mousedown', (e) => {
+        grip.addEventListener('pointerdown', (e) => {
           if (e.button === 0) {
             e.preventDefault();
             e.stopPropagation();
+            activeResize = { dir, startX: e.screenX, startY: e.screenY, pointerId: e.pointerId };
+            if (typeof grip.setPointerCapture === 'function') {
+              try { grip.setPointerCapture(e.pointerId); } catch (_) {}
+            }
             window.chrome?.webview?.postMessage?.({
-              channel: 'window:resize',
+              channel: 'window:resize-start',
               direction: dir
             });
           }
         });
+        grip.addEventListener('pointermove', (e) => {
+          if (activeResize && activeResize.pointerId === e.pointerId) {
+            e.preventDefault();
+            e.stopPropagation();
+            const deltaX = e.screenX - activeResize.startX;
+            const deltaY = e.screenY - activeResize.startY;
+            window.chrome?.webview?.postMessage?.({
+              channel: 'window:resize-step',
+              direction: activeResize.dir,
+              deltaX: Math.round(deltaX),
+              deltaY: Math.round(deltaY)
+            });
+          }
+        });
+        const onPointerEnd = (e) => {
+          if (activeResize && activeResize.pointerId === e.pointerId) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof grip.releasePointerCapture === 'function') {
+              try { grip.releasePointerCapture(e.pointerId); } catch (_) {}
+            }
+            activeResize = null;
+            window.chrome?.webview?.postMessage?.({
+              channel: 'window:resize-end'
+            });
+          }
+        };
+        grip.addEventListener('pointerup', onPointerEnd);
+        grip.addEventListener('pointercancel', onPointerEnd);
       }
       grips.push(grip);
     }
@@ -295,6 +304,10 @@ html.tt-floating-mode .tt-grip-bottomright {
     }
   };
   const stop = () => {
+    if (activeResize) {
+      activeResize = null;
+      try { window.chrome?.webview?.postMessage?.({ channel: 'window:resize-end' }); } catch (_) {}
+    }
     const savedState = state;
     state = null;
     document.documentElement.classList.remove('tt-floating-mode');

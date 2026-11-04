@@ -379,6 +379,8 @@ namespace TizenTubeWindows
         private long floatingWindowCyclePass = 0;
         private long floatingAcceleratorHandled = 0;
         private bool floatingAcceleratorDown = false;
+        private Rectangle resizeStartBounds;
+        private string activeResizeDirection;
         private string windowPlacementFile;
         private Rectangle lastNormalBounds;
         private bool lastWindowWasMaximized;
@@ -816,6 +818,113 @@ namespace TizenTubeWindows
             if (newY < area.Top) newY = area.Top + 10;
 
             Bounds = new Rectangle(newX, newY, newW, newH);
+        }
+
+        private void ApplyResizeStep(string dir, int dx, int dy)
+        {
+            if (!nativeFloatingActive || string.IsNullOrEmpty(dir)) return;
+            if (resizeStartBounds.Width <= 0 || resizeStartBounds.Height <= 0)
+                resizeStartBounds = Bounds;
+
+            var area = Screen.FromControl(this).WorkingArea;
+            int w0 = resizeStartBounds.Width;
+            int h0 = resizeStartBounds.Height;
+            int x0 = resizeStartBounds.X;
+            int y0 = resizeStartBounds.Y;
+
+            int targetW = w0;
+            switch (dir.ToLowerInvariant())
+            {
+                case "left":
+                    targetW = w0 - dx;
+                    break;
+                case "right":
+                    targetW = w0 + dx;
+                    break;
+                case "top":
+                    targetW = (int)Math.Round((h0 - dy) * 16.0 / 9.0);
+                    break;
+                case "bottom":
+                    targetW = (int)Math.Round((h0 + dy) * 16.0 / 9.0);
+                    break;
+                case "topleft":
+                {
+                    double dX = -dx;
+                    double dY = -dy * (16.0 / 9.0);
+                    double deltaW = Math.Abs(dX) > Math.Abs(dY) ? dX : dY;
+                    targetW = (int)Math.Round(w0 + deltaW);
+                    break;
+                }
+                case "topright":
+                {
+                    double dX = dx;
+                    double dY = -dy * (16.0 / 9.0);
+                    double deltaW = Math.Abs(dX) > Math.Abs(dY) ? dX : dY;
+                    targetW = (int)Math.Round(w0 + deltaW);
+                    break;
+                }
+                case "bottomleft":
+                {
+                    double dX = -dx;
+                    double dY = dy * (16.0 / 9.0);
+                    double deltaW = Math.Abs(dX) > Math.Abs(dY) ? dX : dY;
+                    targetW = (int)Math.Round(w0 + deltaW);
+                    break;
+                }
+                case "bottomright":
+                {
+                    double dX = dx;
+                    double dY = dy * (16.0 / 9.0);
+                    double deltaW = Math.Abs(dX) > Math.Abs(dY) ? dX : dY;
+                    targetW = (int)Math.Round(w0 + deltaW);
+                    break;
+                }
+                default:
+                    return;
+            }
+
+            int minW = 240;
+            int minH = 135;
+            int maxW = area.Width - 20;
+            int maxH = area.Height - 20;
+
+            int w = Math.Max(minW, Math.Min(targetW, maxW));
+            int h = (int)Math.Round(w * 9.0 / 16.0);
+            if (h > maxH)
+            {
+                h = maxH;
+                w = (int)Math.Round(h * 16.0 / 9.0);
+            }
+            if (h < minH)
+            {
+                h = minH;
+                w = (int)Math.Round(h * 16.0 / 9.0);
+            }
+
+            int newX = x0;
+            int newY = y0;
+            string d = dir.ToLowerInvariant();
+
+            if (d == "left" || d == "topleft" || d == "bottomleft")
+                newX = x0 + w0 - w;
+            else if (d == "right" || d == "topright" || d == "bottomright")
+                newX = x0;
+            else
+                newX = (x0 + w0 > area.Right - 30) ? (x0 + w0 - w) : x0;
+
+            if (d == "top" || d == "topleft" || d == "topright")
+                newY = y0 + h0 - h;
+            else if (d == "bottom" || d == "bottomleft" || d == "bottomright")
+                newY = y0;
+            else
+                newY = (y0 + h0 > area.Bottom - 30) ? (y0 + h0 - h) : y0;
+
+            if (newX < area.Left) newX = area.Left;
+            if (newY < area.Top) newY = area.Top;
+            if (newX + w > area.Right) newX = area.Right - w;
+            if (newY + h > area.Bottom) newY = area.Bottom - h;
+
+            Bounds = new Rectangle(newX, newY, w, h);
         }
 
         private void ToggleNativeMaximize()
@@ -1678,7 +1787,7 @@ namespace TizenTubeWindows
                     topMostBeforeFloating = TopMost;
                     nativeFloatingActive = true;
                     WindowState = FormWindowState.Normal;
-                    MinimumSize = new Size(240, 150);
+                    MinimumSize = new Size(240, 135);
                     FormBorderStyle = FormBorderStyle.None;
                     var area = Screen.FromControl(this).WorkingArea;
                     int w = Math.Min(500, Math.Max(330, area.Width - 35));
@@ -1694,6 +1803,7 @@ namespace TizenTubeWindows
                 else
                 {
                     nativeFloatingActive = false;
+                    activeResizeDirection = null;
                     TopMost = topMostBeforeFloating;
                     FormBorderStyle = borderBeforeFloating;
                     MinimumSize = minimumBeforeFloating;
@@ -2472,6 +2582,42 @@ namespace TizenTubeWindows
                     if (json.Contains("\"channel\":\"window:drag\""))
                     {
                         DragNativeWindow();
+                        return;
+                    }
+
+                    if (json.Contains("\"channel\":\"window:resize-start\""))
+                    {
+                        using (var doc = System.Text.Json.JsonDocument.Parse(json))
+                        {
+                            if (doc.RootElement.TryGetProperty("direction", out var dirProp))
+                                activeResizeDirection = dirProp.GetString();
+                        }
+                        resizeStartBounds = Bounds;
+                        return;
+                    }
+
+                    if (json.Contains("\"channel\":\"window:resize-step\""))
+                    {
+                        using (var doc = System.Text.Json.JsonDocument.Parse(json))
+                        {
+                            string dir = null;
+                            int dx = 0;
+                            int dy = 0;
+                            if (doc.RootElement.TryGetProperty("direction", out var dirProp))
+                                dir = dirProp.GetString();
+                            if (doc.RootElement.TryGetProperty("deltaX", out var dxProp))
+                                dx = dxProp.GetInt32();
+                            if (doc.RootElement.TryGetProperty("deltaY", out var dyProp))
+                                dy = dyProp.GetInt32();
+
+                            ApplyResizeStep(dir ?? activeResizeDirection, dx, dy);
+                        }
+                        return;
+                    }
+
+                    if (json.Contains("\"channel\":\"window:resize-end\""))
+                    {
+                        activeResizeDirection = null;
                         return;
                     }
 

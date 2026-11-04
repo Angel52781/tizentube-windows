@@ -390,7 +390,7 @@ namespace TizenTubeWindows
                     if (key != null)
                     {
                         key.SetValue("DisplayName", "TizenTube");
-                        key.SetValue("DisplayVersion", "0.1.0-preview.25");
+                        key.SetValue("DisplayVersion", "0.1.0-preview.26");
                         key.SetValue("Publisher", "TizenTube Windows Contributors");
                         key.SetValue("DisplayIcon", exePath);
                         key.SetValue("InstallLocation", installDir);
