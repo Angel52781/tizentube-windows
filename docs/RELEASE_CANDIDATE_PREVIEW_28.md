@@ -2,8 +2,8 @@
 
 **Versión Candidata:** `v0.1.0-preview.28-candidate` (Objetivo: `v0.1.0-preview.28`)  
 **Fecha:** 2026-11-06  
-**Licencia:** GNU General Public License v3.0 ([GPL-3.0-only](file:///srv/orbital/workspaces/tizentube-windows/LICENSE))  
-**Base Commit de Rollback:** [`885245d`](file:///srv/orbital/workspaces/tizentube-windows#885245d) (`v0.1.0-preview.27`)  
+**Licencia:** GNU General Public License v3.0 ([GPL-3.0-only](../LICENSE))  
+**Base Commit de Rollback:** [`885245d`](https://github.com/Angel52781/tizentube-windows/commit/885245d812a4eac796969635fbeb4089d44c8949) (`v0.1.0-preview.27`)  
 **Estado:** Candidato local integrado y probado. Pendiente de compilación nativa en Windows CI y auditoría de release independiente.
 
 ---
@@ -26,14 +26,14 @@ Esta entrega resuelve el problema reportado de duplicación y pérdida de accion
 
 | Componente | Archivo | Modificación |
 | :--- | :--- | :--- |
-| **Runtime de Reproducción** | [`src/runtime/playback_engine.js`](file:///srv/orbital/workspaces/tizentube-windows/src/runtime/playback_engine.js) | Manejo en captura de Space/K/flechas, exclusiones tempranas y reconexión SPA |
-| **Cargador de Módulos** | [`src/mods/mod_loader.js`](file:///srv/orbital/workspaces/tizentube-windows/src/mods/mod_loader.js) | Lifecycle attach/dispose seguro |
-| **Bundles Inyectados** | [`src/mods/tizentube.bundle.js`](file:///srv/orbital/workspaces/tizentube-windows/src/mods/tizentube.bundle.js)<br>[`src/extension/tizentube.bundle.js`](file:///srv/orbital/workspaces/tizentube-windows/src/extension/tizentube.bundle.js) | Regeneración determinista del bundle JS (185.220 bytes) |
-| **Suites de Pruebas** | [`scripts/test_keyboard_shortcuts.js`](file:///srv/orbital/workspaces/tizentube-windows/scripts/test_keyboard_shortcuts.js) | Nueva suite determinista de fases DOM, foco y ciclo de vida (PASS) |
-| **Pruebas de Telemetría** | [`scripts/test_telemetry.js`](file:///srv/orbital/workspaces/tizentube-windows/scripts/test_telemetry.js) | Aislamiento de ficheros temporales en `os.tmpdir()` |
-| **Configuración y Scripts** | [`package.json`](file:///srv/orbital/workspaces/tizentube-windows/package.json) | Integración de `test_keyboard_shortcuts.js` en `npm test` y bump a `0.1.0-preview.28` |
-| **Host C# y Actualizador** | [`src/native/TizenTubeWindows.csproj`](file:///srv/orbital/workspaces/tizentube-windows/src/native/TizenTubeWindows.csproj)<br>[`src/native/PortableUpdater.cs`](file:///srv/orbital/workspaces/tizentube-windows/src/native/PortableUpdater.cs) | Sincronización de versión a `0.1.0-preview.28` |
-| **Instalador y CI** | [`scripts/installer.iss`](file:///srv/orbital/workspaces/tizentube-windows/scripts/installer.iss)<br>[`.github/workflows/windows-native-validation.yml`](file:///srv/orbital/workspaces/tizentube-windows/.github/workflows/windows-native-validation.yml) | Sincronización de artefactos para `v0.1.0-preview.28` |
+| **Runtime de Reproducción** | [`src/runtime/playback_engine.js`](../src/runtime/playback_engine.js) | Manejo en captura de Space/K/flechas, exclusiones tempranas y reconexión SPA |
+| **Cargador de Módulos** | [`src/mods/mod_loader.js`](../src/mods/mod_loader.js) | Lifecycle attach/dispose seguro |
+| **Bundles Inyectados** | [`src/mods/tizentube.bundle.js`](../src/mods/tizentube.bundle.js)<br>[`src/extension/tizentube.bundle.js`](../src/extension/tizentube.bundle.js) | Regeneración determinista del bundle JS (185.220 bytes) |
+| **Suites de Pruebas** | [`scripts/test_keyboard_shortcuts.js`](../scripts/test_keyboard_shortcuts.js) | Nueva suite determinista de fases DOM, foco y ciclo de vida (PASS) |
+| **Pruebas de Telemetría** | [`scripts/test_telemetry.js`](../scripts/test_telemetry.js) | Aislamiento de ficheros temporales en `os.tmpdir()` |
+| **Configuración y Scripts** | [`package.json`](../package.json) | Integración de `test_keyboard_shortcuts.js` en `npm test` y bump a `0.1.0-preview.28` |
+| **Host C# y Actualizador** | [`src/native/TizenTubeWindows.csproj`](../src/native/TizenTubeWindows.csproj)<br>[`src/native/PortableUpdater.cs`](../src/native/PortableUpdater.cs) | Sincronización de versión a `0.1.0-preview.28` |
+| **Instalador y CI** | [`scripts/installer.iss`](../scripts/installer.iss)<br>[`.github/workflows/windows-native-validation.yml`](../.github/workflows/windows-native-validation.yml) | Sincronización de artefactos para `v0.1.0-preview.28` |
 
 ---
 
@@ -50,13 +50,13 @@ Esta entrega resuelve el problema reportado de duplicación y pérdida de accion
 - **`TizenTubeHost.exe` (.NET 8 Publish) y `TizenTube-Setup-x64.exe` (Inno Setup):**  
   **NO GENERADOS LOCALMENTE.** La compilación del host nativo requiere .NET SDK 8.0 para Windows (`net8.0-windows` con WinForms/WPF) e Inno Setup 6 (`ISCC.exe`), los cuales no están disponibles en el entorno Linux de la VPS y están programados para ejecutarse en runners de GitHub Actions (`windows-latest`).
 - **Publicación Externa:** Ningún tag ni release ha sido creado en GitHub. `external-verification-contract-conflict` permanece abierto; no se ha ejecutado `git push` remoto.
-- **Integridad de Enlaces Públicos:** Los enlaces de descarga en [`README.md`](file:///srv/orbital/workspaces/tizentube-windows/README.md) se mantienen apuntando a la versión estable verificada [`v0.1.0-preview.27`](file:///srv/orbital/workspaces/tizentube-windows/README.md#L3-L5) para evitar enlaces rotos o inexistentes.
+- **Integridad de Enlaces Públicos:** Los enlaces de descarga en [`README.md`](../README.md) se mantienen apuntando a la versión estable verificada [`v0.1.0-preview.27`](../README.md#L3-L5) para evitar enlaces rotos o inexistentes.
 
 ---
 
 ## 4. Plan de Rollback a Preview.27
 
 Si surgiera cualquier problema durante la validación o el lanzamiento:
-1. El código base puede revertirse inmediatamente a preview.27 mediante el commit [`885245d`](file:///srv/orbital/workspaces/tizentube-windows#885245d).
+1. El código base puede revertirse inmediatamente a preview.27 mediante el commit [`885245d`](https://github.com/Angel52781/tizentube-windows/commit/885245d812a4eac796969635fbeb4089d44c8949).
 2. Los instaladores y ejecutables de `v0.1.0-preview.27` permanecen accesibles en GitHub Releases sin alteración.
 3. El actualizador dinámico (`PortableUpdater.cs`) mantiene soporte para versiones anteriores mediante comprobación de `CurrentPreview` y descarga atómica con respaldo.
