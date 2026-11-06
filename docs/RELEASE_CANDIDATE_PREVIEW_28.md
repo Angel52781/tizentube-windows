@@ -28,7 +28,7 @@ Esta entrega resuelve el problema reportado de duplicación y pérdida de accion
 | :--- | :--- | :--- |
 | **Runtime de Reproducción** | [`src/runtime/playback_engine.js`](../src/runtime/playback_engine.js) | Manejo en captura de Space/K/flechas, exclusiones tempranas y reconexión SPA |
 | **Cargador de Módulos** | [`src/mods/mod_loader.js`](../src/mods/mod_loader.js) | Lifecycle attach/dispose seguro |
-| **Bundles Inyectados** | [`src/mods/tizentube.bundle.js`](../src/mods/tizentube.bundle.js)<br>[`src/extension/tizentube.bundle.js`](../src/extension/tizentube.bundle.js) | Regeneración determinista del bundle JS (185.220 bytes) |
+| **Bundles Inyectados** | [`src/mods/tizentube.bundle.js`](../src/mods/tizentube.bundle.js)<br>[`src/extension/tizentube.bundle.js`](../src/extension/tizentube.bundle.js) | Regeneración determinista del bundle JS (185.258 bytes / 185.220 caracteres) |
 | **Suites de Pruebas** | [`scripts/test_keyboard_shortcuts.js`](../scripts/test_keyboard_shortcuts.js) | Nueva suite determinista de fases DOM, foco y ciclo de vida (PASS) |
 | **Pruebas de Telemetría** | [`scripts/test_telemetry.js`](../scripts/test_telemetry.js) | Aislamiento de ficheros temporales en `os.tmpdir()` |
 | **Configuración y Scripts** | [`package.json`](../package.json) | Integración de `test_keyboard_shortcuts.js` en `npm test` y bump a `0.1.0-preview.28` |
@@ -44,7 +44,7 @@ Esta entrega resuelve el problema reportado de duplicación y pérdida de accion
   - SHA-256: `a7d071b5168a39e14e53ba32705626617c54fce3c43faf0d827ce4edce168bc1`
   - Verificado por `scripts/verify_pe.py` y `scripts/test_host_integrity.js`.
 - **Manifiesto de Checksums de Distribución:** `dist/TizenTube-win-x64/SHA256SUMS.txt` (38 archivos empaquetados).
-- **Bundle JS Autónomo:** `src/mods/tizentube.bundle.js` (185.220 bytes, SHA-256: `4d5ecdb763e9201f622410862b4660b8968266732383d392fd3b326911dde7fd`).
+- **Bundle JS Autónomo:** `src/mods/tizentube.bundle.js` (185.258 bytes / 185.220 caracteres, SHA-256: `4d5ecdb763e9201f622410862b4660b8968266732383d392fd3b326911dde7fd`).
 
 ### 3.2 Ausencia Explícita de Binarios Nativos Windows
 - **`TizenTubeHost.exe` (.NET 8 Publish) y `TizenTube-Setup-x64.exe` (Inno Setup):**  
