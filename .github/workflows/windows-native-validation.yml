@@ -41,7 +41,7 @@ jobs:
       - name: Verify JavaScript modules, runtime, and unit tests
         shell: pwsh
         run: |
-          npm test
+          npm.cmd test
           node scripts/test_native_adblock_extension.js
           node scripts/test_external_ad_skip_helper.js
           node scripts/test_native_updater.js
@@ -318,20 +318,63 @@ jobs:
             $isccCmd = Get-Command iscc -ErrorAction SilentlyContinue
             if ($isccCmd) { $iscc = $isccCmd.Source }
           }
-          if (Test-Path $iscc) {
-            Write-Host "[INFO] Compiling Windows installer with Inno Setup..."
-            & $iscc scripts/installer.iss
-            if ($LASTEXITCODE -ne 0) { throw 'INNO_SETUP_COMPILATION_FAILED' }
-            $setupExe = 'release-out/TizenTube-Setup-x64.exe'
-            if (Test-Path $setupExe) {
-              $setupSha = (Get-FileHash $setupExe -Algorithm SHA256).Hash.ToLowerInvariant()
-              "$setupSha  $(Split-Path $setupExe -Leaf)" | Add-Content 'release-out/SHA256SUMS.txt'
-              Write-Host "INSTALLER_EXE=$(Split-Path $setupExe -Leaf)"
-              Write-Host "INSTALLER_SHA256=$setupSha"
+          if (!(Test-Path $iscc)) {
+            Write-Host "[INFO] Inno Setup not found. Attempting ephemeral installation via choco..."
+            choco install innosetup --no-progress -y
+            $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+            if (!(Test-Path $iscc)) {
+              $isccCmd = Get-Command iscc -ErrorAction SilentlyContinue
+              if ($isccCmd) { $iscc = $isccCmd.Source }
             }
-          } else {
-            Write-Warning "ISCC.exe not found on runner; installer compilation skipped"
           }
+          if (!(Test-Path $iscc)) {
+            throw 'INNO_SETUP_NOT_FOUND_PACKAGING_FAILED: Inno Setup 6 (ISCC.exe) is required to compile TizenTube-Setup-x64.exe'
+          }
+
+          Write-Host "[INFO] Compiling Windows installer with Inno Setup..."
+          & $iscc scripts/installer.iss
+          if ($LASTEXITCODE -ne 0) { throw 'INNO_SETUP_COMPILATION_FAILED' }
+          $setupExe = 'release-out/TizenTube-Setup-x64.exe'
+          if (!(Test-Path $setupExe)) {
+            throw 'INSTALLER_EXE_NOT_GENERATED'
+          }
+          $setupSha = (Get-FileHash $setupExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$setupSha  $(Split-Path $setupExe -Leaf)" | Add-Content 'release-out/SHA256SUMS.txt'
+          Write-Host "INSTALLER_EXE=$(Split-Path $setupExe -Leaf)"
+          Write-Host "INSTALLER_SHA256=$setupSha"
+
+          # Verify installer execution, installation, and installed binary
+          $testInstallDir = Join-Path $env:RUNNER_TEMP 'tt-test-install'
+          Write-Host "[INFO] Testing installer silent installation to $testInstallDir..."
+          & $setupExe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="$testInstallDir"
+          if ($LASTEXITCODE -ne 0) { throw 'INSTALLER_EXECUTION_FAILED' }
+          $installedHost = Join-Path $testInstallDir 'TizenTubeHost.exe'
+          if (!(Test-Path $installedHost)) { throw 'INSTALLED_HOST_MISSING' }
+          Write-Host "[INFO] Testing installed host smoke test..."
+          & $installedHost --verify-in-place-updater
+          if ($LASTEXITCODE -ne 0) { throw 'INSTALLED_HOST_SMOKE_FAILED' }
+          Remove-Item -Path $testInstallDir -Recurse -Force -ErrorAction SilentlyContinue
+
+          # Capture and record digital signature status
+          $sigExe = Get-AuthenticodeSignature (Join-Path $pkg 'TizenTubeHost.exe')
+          $sigSetup = Get-AuthenticodeSignature $setupExe
+          Write-Host "SIGNATURE_STATUS_HOST=$($sigExe.Status)"
+          Write-Host "SIGNATURE_STATUS_SETUP=$($sigSetup.Status)"
+          $sigReport = [ordered]@{
+            host = @{
+              file = 'TizenTubeHost.exe'
+              status = [string]$sigExe.Status
+              statusMessage = $sigExe.StatusMessage
+              isOSBinary = $sigExe.IsOSBinary
+            }
+            installer = @{
+              file = 'TizenTube-Setup-x64.exe'
+              status = [string]$sigSetup.Status
+              statusMessage = $sigSetup.StatusMessage
+              isOSBinary = $sigSetup.IsOSBinary
+            }
+          }
+          $sigReport | ConvertTo-Json -Depth 4 | Set-Content 'release-out/signature-status.json' -Encoding utf8
 
       - name: Upload portable tester ZIP and SHA-256
         uses: actions/upload-artifact@v4
@@ -341,6 +384,7 @@ jobs:
             release-out/TizenTube-Windows-x64-v0.1.0-preview.28.zip
             release-out/TizenTube-Setup-x64.exe
             release-out/SHA256SUMS.txt
+            release-out/signature-status.json
             release-out/portable-smoke-evidence.json
             release-out/standalone-exe-smoke-evidence.json
             release-out/floating-window-cycle-evidence.json

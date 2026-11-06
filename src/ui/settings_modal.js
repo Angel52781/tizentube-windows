@@ -376,7 +376,9 @@ export class SettingsModal {
     this.element.style.display = 'flex';
     this.isOpen = true;
     requestAnimationFrame(() => {
-      this.element.classList.add('tt-modal-open');
+      if (this.element) {
+        this.element.classList.add('tt-modal-open');
+      }
     });
     this.emit('open');
   }

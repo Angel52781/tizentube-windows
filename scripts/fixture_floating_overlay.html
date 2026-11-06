@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>TizenTube Floating Overlay Fixture</title>
+  <style>
+    body { margin: 0; padding: 0; background: #0f0f0f; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+    #watch-page { width: 100vw; height: 100vh; display: flex; flex-direction: column; }
+    #player-container { width: 100%; max-width: 854px; height: 480px; margin: 0 auto; background: #222; position: relative; }
+    #movie_player { width: 100%; height: 100%; position: relative; background: #000; }
+    .html5-video-container { width: 100%; height: 100%; }
+    video.html5-main-video { width: 100%; height: 100%; object-fit: contain; }
+  </style>
+</head>
+<body>
+  <div id="watch-page">
+    <div id="player-container">
+      <div id="movie_player">
+        <div class="html5-video-container">
+          <canvas id="video-canvas" width="1280" height="720" style="display:none;"></canvas>
+          <video class="html5-main-video" autoplay playsinline muted></video>
+        </div>
+        <div class="ytp-chrome-bottom">Original YouTube Chrome</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../src/native/floating_player.js"></script>
+  <script>
+    // Prepare video stream from canvas
+    const canvas = document.getElementById('video-canvas');
+    const ctx = canvas.getContext('2d');
+
+    // Draw animated test pattern
+    const grad = ctx.createLinearGradient(0, 0, 1280, 720);
+    grad.addColorStop(0, '#111e38');
+    grad.addColorStop(0.5, '#42121e');
+    grad.addColorStop(1, '#664411');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 1280, 720);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 50px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('TizenTube Floating Video Stream', 640, 320);
+    ctx.font = '28px sans-serif';
+    ctx.fillText('Active Media Surface · 1280x720', 640, 380);
+
+    const stream = canvas.captureStream(30);
+    const video = document.querySelector('video.html5-main-video');
+    video.srcObject = stream;
+    video.currentTime = 84;
+    Object.defineProperty(video, 'duration', { value: 345, writable: true });
+
+    // Mock watch URL for floating_player.js gating
+    try {
+      history.pushState({}, '', '/watch?v=dQw4w9WgXcQ');
+    } catch (_) {}
+
+    function startFloating() {
+      if (window.__ttFloating) {
+        video.currentTime = 125;
+        const success = window.__ttFloating.start();
+        console.log('[FIXTURE] start() result:', success);
+        console.log('[FIXTURE] diagnostics:', JSON.stringify(window.__ttFloating.diagnostics()));
+        // Force overlay to visible state for the visual fixture capture
+        const overlay = document.getElementById('tt-floating-overlay');
+        if (overlay) {
+          overlay.classList.add('tt-overlay-visible');
+        }
+      }
+    }
+
+    video.addEventListener('loadedmetadata', startFloating);
+    video.addEventListener('canplay', startFloating);
+    // Fallback
+    setTimeout(startFloating, 100);
+  </script>
+</body>
+</html>

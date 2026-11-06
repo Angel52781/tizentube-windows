@@ -595,6 +595,12 @@ class PlaybackEngine {
         Boolean(target?.classList?.contains?.('ytp-button') || target?.classList?.contains?.('tt-btn')) ||
         Boolean(typeof target?.className === 'string' && target.className.includes('ytp-'));
 
+      // Check whether target is an interactive button or link control
+      const isInteractiveButton = Boolean(
+        ['button', 'a'].includes(tag) ||
+        target?.closest?.('button, [role="button"], a, [role="link"]')
+      );
+
       const key = e.code === 'Space' ? ' ' : e.key;
 
       // Native YouTube owns C (captions), T (theater) and I (miniplayer).
@@ -602,11 +608,23 @@ class PlaybackEngine {
       // choice. Consuming these at window capture would break that contract.
       if (typeof key === 'string' && ['c', 't', 'i'].includes(key.toLowerCase())) return;
 
-      // Unrelated external buttons/links (outside player):
-      // Intercept Space and K for playback control; leave navigation keys (arrows, Tab)
-      // to the focused external control.
-      if (!isPlayerTarget && ['button', 'a'].includes(tag)) {
-        if (![' ', 'Spacebar', 'k', 'K'].includes(key)) {
+      // Authority of Focus for Space:
+      // If focus is on an interactive button or link (whether player buttons like play/mute/settings,
+      // external buttons like subscribe, or TizenTube buttons), Space must NOT be intercepted here.
+      // The browser natively handles Space on keydown and fires 'click' on keyup for the focused button,
+      // activating that button exactly once. For example:
+      // - Focused play button toggles playback via its click handler without duplicate keydown toggle.
+      // - Focused mute button toggles mute (does NOT toggle playback).
+      // - Focused subscribe button toggles subscription (does NOT toggle playback).
+      if (isInteractiveButton && (key === ' ' || key === 'Spacebar')) {
+        return;
+      }
+
+      // Unrelated external interactive controls outside player (e.g. subscribe button, links):
+      // K is the dedicated YouTube hotkey for play/pause and applies globally (except text fields/dialogs).
+      // Navigation keys (arrows, Tab, Space) on external controls belong to native UI.
+      if (!isPlayerTarget && isInteractiveButton) {
+        if (!['k', 'K'].includes(key)) {
           return;
         }
       }
@@ -614,9 +632,6 @@ class PlaybackEngine {
       // YouTube also handles these keys. Capture *before* its document/player
       // handlers; preventDefault alone at window bubble phase is too late
       // and causes a 5s seek followed by another 5s seek (visible as 10s).
-      // Crucially, preventDefault on Space prevents the browser from synthesizing
-      // a secondary 'click' event on focused player buttons (<button> / [role="button"]),
-      // which previously caused Space to toggle play and immediately resume.
       const claim = () => {
         e.preventDefault();
         e.stopImmediatePropagation?.();
@@ -634,8 +649,15 @@ class PlaybackEngine {
       switch (key) {
         case ' ':
         case 'Spacebar':
+          // Focused on progress bar, video element, #movie_player or body:
+          // Claim event so YouTube bubble listeners don't double-toggle,
+          // and filter e.repeat so holding Space does not oscillate.
+          claim();
+          if (!e.repeat) this.togglePlay();
+          break;
         case 'k':
         case 'K':
+          // Universal play/pause hotkey: claims event, filters e.repeat
           claim();
           if (!e.repeat) this.togglePlay();
           break;
@@ -694,18 +716,43 @@ class PlaybackEngine {
           claim();
           this.toggleFullscreen();
           break;
+        case 'Escape':
+          if (this.state.isFullscreen || (typeof document !== 'undefined' && Boolean(
+            document.fullscreenElement ||
+            document.webkitFullscreenElement ||
+            document.mozFullScreenElement ||
+            document.msFullscreenElement
+          ))) {
+            claim();
+            this.exitFullscreen();
+          }
+          break;
         case '>':
         case '.':
-          if (e.shiftKey || e.key === '>') {
+          if (e.shiftKey || key === '>') {
             claim();
             this.setPlaybackRate(this.state.playbackRate + 0.25);
+          } else {
+            // Frame-step forward only when video is paused (standard YouTube)
+            const isPaused = this.videoElement ? this.videoElement.paused : !this.state.isPlaying;
+            if (isPaused) {
+              claim();
+              this.seekBy(1 / 30);
+            }
           }
           break;
         case '<':
         case ',':
-          if (e.shiftKey || e.key === '<') {
+          if (e.shiftKey || key === '<') {
             claim();
             this.setPlaybackRate(this.state.playbackRate - 0.25);
+          } else {
+            // Frame-step backward only when video is paused (standard YouTube)
+            const isPaused = this.videoElement ? this.videoElement.paused : !this.state.isPlaying;
+            if (isPaused) {
+              claim();
+              this.seekBy(-1 / 30);
+            }
           }
           break;
       }
@@ -4108,7 +4155,9 @@ class SettingsModal {
     this.element.style.display = 'flex';
     this.isOpen = true;
     requestAnimationFrame(() => {
-      this.element.classList.add('tt-modal-open');
+      if (this.element) {
+        this.element.classList.add('tt-modal-open');
+      }
     });
     this.emit('open');
   }
@@ -4449,6 +4498,9 @@ class AppUI {
 
     // 6. Global Keyboard Shortcuts
     this._onKeyDown = (e) => {
+      // Do not steal IME composition or system / browser combinations
+      if (e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return;
+
       const tag = e.target.tagName ? e.target.tagName.toLowerCase() : '';
       if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) {
         if (e.key === 'Escape' && typeof e.target.blur === 'function') {
@@ -4459,62 +4511,17 @@ class AppUI {
 
       resetCursorIdle();
 
-      if (e.key === 's' || e.key === 'S') {
-        e.preventDefault();
-        if (this.settingsModal.isOpen) {
-          this.settingsModal.close();
-        } else {
-          this.settingsModal.open();
-        }
-      } else if (e.key === '/') {
+      // '/' focuses search bar; Escape closes open modal.
+      // Bare A/D/S/B are NOT intercepted globally to avoid collisions with YouTube web
+      // (e.g. 360-degree video panning with A/D, YouTube hotkeys).
+      // Mod features (AdBlock, DeArrow, SponsorBlock, Settings) remain fully accessible via UI.
+      if (e.key === '/') {
         e.preventDefault();
         this.navBar.focusSearch();
       } else if (e.key === 'Escape') {
         if (this.settingsModal.isOpen) {
           e.preventDefault();
           this.settingsModal.close();
-        }
-      } else if (e.key === 'b' || e.key === 'B') {
-        if (this.sponsorblock) {
-          e.preventDefault();
-          const next = !this.sponsorblock.options.autoSkip;
-          this.sponsorblock.setAutoSkip(next);
-          this.settingsModal.settings.sponsorblock.autoSkip = next;
-          this.savePreferences(this.settingsModal.getSettings());
-          this.toasts.show({
-            title: 'SponsorBlock',
-            message: `Auto-Skip: ${next ? 'Enabled' : 'Disabled'}`,
-            color: '#00d400',
-            durationMs: 2000
-          });
-        }
-      } else if (e.key === 'a' || e.key === 'A') {
-        if (this.adblock) {
-          e.preventDefault();
-          const next = !this.adblock.options.enabled;
-          this.adblock.setEnabled(next);
-          this.settingsModal.settings.adblock.enabled = next;
-          this.savePreferences(this.settingsModal.getSettings());
-          this.toasts.show({
-            title: 'AdBlock',
-            message: `Ad Blocking: ${next ? 'Enabled' : 'Disabled'}`,
-            color: '#3ea6ff',
-            durationMs: 2000
-          });
-        }
-      } else if (e.key === 'd' || e.key === 'D') {
-        if (this.dearrow) {
-          e.preventDefault();
-          const next = !this.dearrow.options.enabled;
-          this.dearrow.setEnabled(next);
-          this.settingsModal.settings.dearrow.enabled = next;
-          this.savePreferences(this.settingsModal.getSettings());
-          this.toasts.show({
-            title: 'DeArrow',
-            message: `Anti-Clickbait: ${next ? 'Enabled' : 'Disabled'}`,
-            color: '#ff9900',
-            durationMs: 2000
-          });
         }
       }
     };

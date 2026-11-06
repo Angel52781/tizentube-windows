@@ -41,6 +41,10 @@ $s2 = $summary.step2_theater
 $s3 = $summary.step3_floating
 $s4 = $summary.step4_fullscreen
 $s5 = $summary.step5_return
+$s6 = $summary.step6_floating_seek
+$s7 = $summary.step7_restore
+$s8 = $summary.step8_dismiss
+$s9 = $summary.step9_recovered
 
 # Check if video was able to initialize in this runner
 $videoLoaded = ($s1.readyState -ge 2 -and $s1.videoWidth -gt 0)
@@ -66,8 +70,21 @@ if ($videoLoaded) {
     Assert-Cycle ($s5.videoWidth -gt 0) 'step5-return-video-width-valid-no-black-surface'
     Assert-Cycle ($s5.currentTime -gt ($s1.currentTime + 0.5)) 'step5-return-playback-time-advanced'
 
+    # Verify differentiated Restore vs Dismiss lifecycle & controls contract
+    if ($s6 -and $s7 -and $s8) {
+        Assert-Cycle ($s6.floating -eq $true -and $s6.restoreButtonPresent -eq $true -and $s6.closeButtonPresent -eq $true -and $s6.rewindButtonPresent -eq $true -and $s6.playButtonPresent -eq $true -and $s6.forwardButtonPresent -eq $true -and $s6.progressBarPresent -eq $true -and $s6.timeDisplayPresent -eq $true) 'step6-floating-controls-contract-verified'
+        Assert-Cycle ($s6.currentTime -gt $s5.currentTime) 'step6-floating-seek-advanced-time'
+        Assert-Cycle ($s7.floating -eq $false -and $s7.paused -eq $false) 'step7-restore-retains-playback-state'
+        Assert-Cycle ($s8.floating -eq $false -and $s8.paused -eq $true) 'step8-dismiss-pauses-playback'
+        Assert-Cycle ($s8.currentTime -gt 0) 'step8-dismiss-retains-playback-time'
+        if ($s9) {
+            Assert-Cycle ($s9.floating -eq $false) 'step9-recovered-from-minimized'
+        }
+    }
+
     if ($OfflineFixture) {
         $stages = @('01-normal', '02-theater', '03-floating', '04-fullscreen', '05-return')
+        if ($s6) { $stages += @('06-floating-seek', '07-restore') }
         foreach ($st in $stages) {
             $pngPath = Join-Path $dir "cycle-$st.png"
             Assert-Cycle (Test-Path $pngPath) "offline-fixture-png-captured-$st"

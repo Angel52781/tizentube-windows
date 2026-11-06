@@ -1,17 +1,20 @@
 #!/usr/bin/env node
 /**
- * Regression suite for playback keyboard ownership in the WebView2 injection.
+ * Regression suite for playback keyboard ownership and focus authority in the WebView2 injection.
  * Run on GitHub Actions Windows and locally in npm test.
  * Simulates event phases (capture -> target -> bubble), native browser default actions,
  * focus targets (player buttons, HUD controls, text fields, sliders, modals), modifiers,
- * repeat keys, reinjection defense, and attach/dispose lifecycle.
+ * repeat keys, frame-stepping, A/D/S/B non-collision, reinjection defense, and attach/dispose lifecycle.
  */
 import assert from 'node:assert/strict';
 import { PlaybackEngine } from '../src/runtime/playback_engine.js';
+import { AppUI } from '../src/ui/app_ui.js';
 
 class FakeWindow {
   constructor() {
     this.listeners = [];
+    this.location = { href: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' };
+    this.history = { back() {}, forward() {} };
   }
   addEventListener(type, fn, options = false) {
     this.listeners.push({ type, fn, capture: options === true || Boolean(options?.capture) });
@@ -51,21 +54,79 @@ class FakeWindow {
 
 const originalWindow = globalThis.window;
 const originalDocument = globalThis.document;
+const originalLocalStorage = globalThis.localStorage;
+const originalRAF = globalThis.requestAnimationFrame;
+const originalCAF = globalThis.cancelAnimationFrame;
+
+globalThis.requestAnimationFrame = fn => setTimeout(fn, 0);
+globalThis.cancelAnimationFrame = id => clearTimeout(id);
+
+const storage = new Map();
+globalThis.localStorage = {
+  getItem: k => storage.get(k) || null,
+  setItem: (k, v) => storage.set(k, String(v)),
+  removeItem: k => storage.delete(k),
+  clear: () => storage.clear()
+};
+
 const fakeWindow = new FakeWindow();
 globalThis.window = fakeWindow;
 
 let liveDomVideo = null;
 globalThis.document = {
-  body: { nodeType: 1 },
+  head: {
+    appendChild() {},
+    removeChild() {},
+    querySelector: () => null,
+    querySelectorAll: () => []
+  },
+  body: {
+    nodeType: 1,
+    tagName: 'BODY',
+    classList: { add() {}, remove() {}, contains: () => false },
+    appendChild() {},
+    prepend() {},
+    insertBefore() {},
+    removeChild() {},
+    querySelector: () => null,
+    querySelectorAll: () => []
+  },
+  documentElement: {
+    classList: { add() {}, remove() {}, contains: () => false }
+  },
+  createElement(tag) {
+    const el = {
+      tagName: tag.toUpperCase(),
+      style: {},
+      classList: { add() {}, remove() {}, contains: () => false },
+      setAttribute() {},
+      getAttribute() { return null; },
+      addEventListener() {},
+      removeEventListener() {},
+      appendChild() {},
+      prepend() {},
+      insertBefore() {},
+      removeChild() {},
+      querySelector: () => null,
+      querySelectorAll: () => []
+    };
+    return el;
+  },
+  createElementNS(_, tag) {
+    return this.createElement(tag);
+  },
   querySelector(sel) {
     if (sel.includes('video')) return liveDomVideo;
     return null;
   },
+  querySelectorAll() { return []; },
+  getElementById() { return null; },
   addEventListener() {},
   removeEventListener() {}
 };
 
 let engine;
+let appUI;
 try {
   let youtubeKeyEvents = 0;
   let watchedTimeUpdates = [];
@@ -98,12 +159,15 @@ try {
   const video = createVideo('video-main');
   liveDomVideo = video;
 
-  // YouTube listener registered at bubble phase (e.g. on window/document)
+  // YouTube listener registered at bubble phase (e.g. on window/document).
+  // In native YouTube web, document keyboard handler ignores buttons because the browser
+  // activates buttons via 'click' on keyup.
   fakeWindow.addEventListener('keydown', e => {
     youtubeKeyEvents++;
-    if (e.key === 'ArrowRight') video.currentTime += 5;
-    if (e.key === 'ArrowLeft') video.currentTime -= 5;
-    if (e.key === ' ') video.paused ? video.play() : video.pause();
+    const isBtn = e.target?.tagName === 'BUTTON' || Boolean(e.target?.closest?.('button, [role="button"]'));
+    if (e.key === 'ArrowRight' && !isBtn) video.currentTime += 5;
+    if (e.key === 'ArrowLeft' && !isBtn) video.currentTime -= 5;
+    if (e.key === ' ' && !isBtn) video.paused ? video.play() : video.pause();
   });
 
   engine = new PlaybackEngine({ rememberPreferences: false });
@@ -127,10 +191,10 @@ try {
   assert.deepEqual(assignments, [105, 100], 'Reverse seek must not create intermediate jump');
 
   // --------------------------------------------------------------------------
-  // Test 2: Space toggles play/pause; held Space does not oscillate
+  // Test 2: Space toggles play/pause on neutral targets; held Space does not oscillate
   // --------------------------------------------------------------------------
   const pause = fakeWindow.send(' ');
-  assert.equal(video.paused, true, 'Space must pause video');
+  assert.equal(video.paused, true, 'Space on body/div must pause video');
   assert.ok(pause.defaultPrevented && pause.stopped);
 
   fakeWindow.send(' ', { tagName: 'DIV' }, { repeat: true });
@@ -140,8 +204,21 @@ try {
   assert.equal(video.paused, false, 'Keyboard layout with code=Space must resume');
   assert.equal(youtubeKeyEvents, 0, 'Video shortcuts must not also trigger YouTube handler');
 
+  // Space on progress bar (.ytp-progress-bar) toggles playback cleanly
+  const progressBar = {
+    tagName: 'DIV',
+    className: 'ytp-progress-bar',
+    classList: { contains: c => c === 'ytp-progress-bar' },
+    closest: sel => sel.includes('ytp-progress-bar') ? {} : null
+  };
+  const pbSpace = fakeWindow.send(' ', progressBar);
+  assert.ok(pbSpace.defaultPrevented && pbSpace.stopped, 'Space on progress bar must claim event');
+  assert.equal(video.paused, true, 'Space on progress bar must pause video');
+  fakeWindow.send(' ', progressBar);
+  assert.equal(video.paused, false, 'Second Space on progress bar resumes video');
+
   // --------------------------------------------------------------------------
-  // Test 3: K toggles play/pause reliably
+  // Test 3: K toggles play/pause reliably everywhere (except text fields)
   // --------------------------------------------------------------------------
   const pauseK = fakeWindow.send('k');
   assert.equal(video.paused, true, 'K must pause video');
@@ -185,81 +262,139 @@ try {
   assert.equal(video.playbackRate, 1.0, '< must decrease speed by 0.25x');
 
   // --------------------------------------------------------------------------
-  // Test 6: Player control buttons & HUD (The Core Bug & Regression Fix)
-  // When focus is on a player control button, Space must claim and preventDefault.
-  // In Chromium, if preventDefault is NOT called on Space, the browser synthesizes
-  // a click on keyup, causing a double play/pause toggle.
+  // Test 5b: Frame-stepping (, and .) ONLY in pause (YouTube Help Center Parity)
   // --------------------------------------------------------------------------
-  const playerButtons = [
-    {
-      tagName: 'BUTTON',
-      className: 'ytp-play-button ytp-button',
-      classList: { contains: c => c === 'ytp-play-button' || c === 'ytp-button' },
-      closest: sel => sel.includes('ytp-button') || sel.includes('html5-video-player') ? {} : null
-    },
-    {
-      tagName: 'BUTTON',
-      className: 'tt-btn tt-play-btn',
-      classList: { contains: c => c === 'tt-btn' || c === 'tt-play-btn' },
-      closest: sel => sel.includes('tt-btn') || sel.includes('tt-player-controls') ? {} : null
-    },
-    {
-      tagName: 'BUTTON',
-      className: 'ytp-mute-button ytp-button',
-      classList: { contains: c => c === 'ytp-mute-button' || c === 'ytp-button' },
-      closest: sel => sel.includes('ytp-button') ? {} : null
-    }
-  ];
+  video.currentTime = 50;
+  video.paused = false;
 
-  for (const button of playerButtons) {
-    video.paused = false;
-    let buttonClicks = 0;
-    const simulateBrowserDefaultAction = (evt) => {
-      // Browsers fire 'click' on keyup for focused buttons ONLY when defaultPrevented is false
-      if (!evt.defaultPrevented) {
-        buttonClicks++;
-        video.paused ? video.play() : video.pause();
-      }
-    };
+  // While video is playing: bare . and , must NOT step frames and must NOT alter speed
+  fakeWindow.send('.');
+  assert.equal(video.currentTime, 50, 'Period while playing must NOT step frame');
+  assert.equal(video.playbackRate, 1.0, 'Period without Shift must NOT modify playbackRate');
 
-    // Space press on focused player button
-    const spaceEvt = fakeWindow.send(' ', button);
-    assert.ok(spaceEvt.defaultPrevented, 'Space on player button must call preventDefault to stop duplicate click');
-    assert.ok(spaceEvt.stopped, 'Space on player button must stop propagation to YouTube');
-    assert.equal(video.paused, true, 'Space on player button must pause video exactly once');
+  fakeWindow.send(',');
+  assert.equal(video.currentTime, 50, 'Comma while playing must NOT step frame');
+  assert.equal(video.playbackRate, 1.0, 'Comma without Shift must NOT modify playbackRate');
 
-    // Browser keyup simulation
-    simulateBrowserDefaultAction(spaceEvt);
-    assert.equal(buttonClicks, 0, 'No synthetic click should occur when defaultPrevented is true');
-    assert.equal(video.paused, true, 'Video must remain paused (no double-toggle back to playing)');
+  // When video is paused: . advances 1 frame (~1/30s), , rewinds 1 frame (~1/30s)
+  video.paused = true;
+  fakeWindow.send('.');
+  assert.ok(Math.abs(video.currentTime - (50 + 1 / 30)) < 0.0001,
+    'Period while paused must advance exactly 1 frame (+1/30s)');
+  assert.equal(video.playbackRate, 1.0, 'Frame-step must never alter playback rate');
 
-    // Space resume on focused player button
-    const resumeEvt = fakeWindow.send(' ', button);
-    assert.ok(resumeEvt.defaultPrevented);
-    assert.equal(video.paused, false, 'Second Space press on player button must resume video');
-    simulateBrowserDefaultAction(resumeEvt);
-    assert.equal(video.paused, false, 'Video remains playing (no oscillation)');
-
-    // Space held on focused player button
-    fakeWindow.send(' ', button, { repeat: true });
-    assert.equal(video.paused, false, 'Held Space on player button must not oscillate');
-
-    // K on focused player button
-    const kEvt = fakeWindow.send('k', button);
-    assert.ok(kEvt.defaultPrevented, 'K on player button must be claimed');
-    assert.equal(video.paused, true, 'K on player button must toggle playback');
-    fakeWindow.send('k', button);
-    assert.equal(video.paused, false);
-
-    // ArrowRight on player button seeks
-    const beforeT = video.currentTime;
-    const seekEvt = fakeWindow.send('ArrowRight', button);
-    assert.ok(seekEvt.defaultPrevented, 'ArrowRight on player button must claim and seek');
-    assert.equal(video.currentTime, beforeT + 5, 'ArrowRight on player button advances seek');
-  }
+  fakeWindow.send(',');
+  assert.ok(Math.abs(video.currentTime - 50) < 0.0001,
+    'Comma while paused must rewind exactly 1 frame (-1/30s)');
+  assert.equal(video.playbackRate, 1.0, 'Frame-step must never alter playback rate');
 
   // --------------------------------------------------------------------------
-  // Test 7: Sliders (Volume & Progress bar)
+  // Test 6: Focus Authority Matrix on Buttons (Regression Proof: BEFORE vs AFTER)
+  //
+  // BEFORE (The bug in 661423e):
+  // PlaybackEngine claimed Space and called togglePlay() directly on keydown for all buttons.
+  // This had two critical flaws:
+  //   1. It called preventDefault, suppressing the browser's native keyup -> 'click' synthesis.
+  //      Consequently, pressing Space on a mute button or settings button toggled play/pause
+  //      instead of muting or opening settings!
+  //   2. On external buttons (e.g. Subscribe), it hijacked Space and prevented the button action.
+  //
+  // AFTER (YouTube Web Semantics):
+  // Interactive buttons (<button>, [role="button"]) are NOT intercepted by PlaybackEngine on Space.
+  // The browser natively handles Space and fires 'click' on keyup on THAT focused button:
+  //   - Focused Play Button: keyup 'click' toggles playback ONCE (no double toggle).
+  //   - Focused Mute Button: keyup 'click' toggles mute (video playback state is untouched).
+  //   - Focused Settings Button: keyup 'click' opens settings (video playback untouched).
+  //   - K remains universal play/pause without firing button clicks.
+  // --------------------------------------------------------------------------
+  const playButton = {
+    tagName: 'BUTTON',
+    className: 'ytp-play-button ytp-button',
+    classList: { contains: c => c === 'ytp-play-button' || c === 'ytp-button' },
+    closest: sel => sel.includes('ytp-button') || sel.includes('html5-video-player') ? {} : null
+  };
+
+  const muteButton = {
+    tagName: 'BUTTON',
+    className: 'ytp-mute-button ytp-button',
+    classList: { contains: c => c === 'ytp-mute-button' || c === 'ytp-button' },
+    closest: sel => sel.includes('ytp-button') || sel.includes('html5-video-player') ? {} : null
+  };
+
+  const ttPlayButton = {
+    tagName: 'BUTTON',
+    className: 'tt-btn tt-play-btn',
+    classList: { contains: c => c === 'tt-btn' || c === 'tt-play-btn' },
+    closest: sel => sel.includes('tt-btn') || sel.includes('tt-player-controls') ? {} : null
+  };
+
+  // Case A: Focused Play Button
+  video.paused = false;
+  let playButtonClicks = 0;
+  const playClick = () => { playButtonClicks++; video.paused = !video.paused; };
+
+  const playSpace = fakeWindow.send(' ', playButton);
+  assert.equal(playSpace.defaultPrevented, false,
+    'Space on play button must NOT be defaultPrevented on keydown, enabling browser native keyup click');
+  assert.equal(video.paused, false,
+    'Space keydown alone must NOT toggle video playback on button, preventing duplicate keydown+click toggle');
+
+  // Chromium fires 'click' on keyup when defaultPrevented is false
+  if (!playSpace.defaultPrevented) playClick();
+  assert.equal(playButtonClicks, 1, 'Native click must fire on keyup');
+  assert.equal(video.paused, true, 'Video paused once by play button activation');
+
+  // Second press resumes
+  const resumeSpace = fakeWindow.send(' ', playButton);
+  assert.equal(resumeSpace.defaultPrevented, false);
+  if (!resumeSpace.defaultPrevented) playClick();
+  assert.equal(playButtonClicks, 2);
+  assert.equal(video.paused, false, 'Second Space resumes video via button click');
+
+  // Case B: Focused Mute Button (Proves Fix for 661423e Bug)
+  video.muted = false;
+  video.paused = false;
+  let muteButtonClicks = 0;
+  const muteClick = () => { muteButtonClicks++; video.muted = !video.muted; };
+
+  const muteSpace = fakeWindow.send(' ', muteButton);
+  assert.equal(muteSpace.defaultPrevented, false,
+    'Space on mute button must NOT be intercepted with preventDefault');
+  assert.equal(video.paused, false,
+    'Space on mute button must NEVER pause or toggle playback! (Fixes 661423e regression)');
+
+  // Keyup default action fires mute click
+  if (!muteSpace.defaultPrevented) muteClick();
+  assert.equal(muteButtonClicks, 1, 'Mute button receives click on keyup');
+  assert.equal(video.muted, true, 'Mute button successfully toggled video.muted');
+  assert.equal(video.paused, false, 'Video remains playing uninterrupted while muting');
+
+  // Case C: K on focused player button handles playback universally without clicking button
+  const kEvt = fakeWindow.send('k', muteButton);
+  assert.ok(kEvt.defaultPrevented && kEvt.stopped, 'K on button must be claimed by PlaybackEngine');
+  assert.equal(video.paused, true, 'K must pause video directly');
+  assert.equal(muteButtonClicks, 1, 'K must NOT trigger synthetic click on focused mute button');
+
+  const resumeKEvt = fakeWindow.send('k', muteButton);
+  assert.equal(video.paused, false, 'Second K resumes video');
+  assert.equal(muteButtonClicks, 1, 'Mute button click count remains unchanged');
+
+  // Case D: ArrowRight on player button seeks +5s
+  const beforeT = video.currentTime;
+  const seekEvt = fakeWindow.send('ArrowRight', playButton);
+  assert.ok(seekEvt.defaultPrevented, 'ArrowRight on player button must claim and seek');
+  assert.equal(video.currentTime, beforeT + 5, 'ArrowRight on player button advances seek');
+
+  // Case E: TizenTube custom player button (.tt-btn)
+  let ttClicks = 0;
+  const ttClick = () => { ttClicks++; video.paused = !video.paused; };
+  const ttSpace = fakeWindow.send(' ', ttPlayButton);
+  assert.equal(ttSpace.defaultPrevented, false, 'Space on TT button allows browser native click');
+  if (!ttSpace.defaultPrevented) ttClick();
+  assert.equal(ttClicks, 1);
+
+  // --------------------------------------------------------------------------
+  // Test 7: Sliders (Volume Slider)
   // --------------------------------------------------------------------------
   const volumeSlider = {
     tagName: 'DIV',
@@ -345,42 +480,121 @@ try {
   }
 
   // --------------------------------------------------------------------------
-  // Test 9: External non-player buttons leave arrow navigation to native UI
+  // Test 9: External non-player buttons (Subscribe, Like, Links)
+  //
+  // Demonstrates correct YouTube authority:
+  // Space on external button activates that button on keyup, does NOT hijack playback!
+  // Arrows on external button perform native browser navigation, not video seek!
   // --------------------------------------------------------------------------
+  let subscribeActivated = false;
   const externalButton = {
     tagName: 'BUTTON',
     className: 'ytd-subscribe-button-renderer',
     closest: () => null
   };
+  const onSubscribeClick = () => { subscribeActivated = true; };
+
   const beforeExternal = video.currentTime;
   const extArrow = fakeWindow.send('ArrowRight', externalButton);
   assert.ok(!extArrow.defaultPrevented, 'Arrow on external button must not be intercepted');
-  assert.equal(video.currentTime, beforeExternal + 5, 'Unclaimed arrow reaches native YouTube simulator');
-  video.currentTime = beforeExternal;
+  assert.equal(video.currentTime, beforeExternal, 'Arrow on external button must not seek video (retains native UI navigation)');
 
-  // Space on external button while watching video triggers playback and prevents button click
+  // Space on external button: must NOT be defaultPrevented; activates button on keyup
   video.paused = false;
   const extSpace = fakeWindow.send(' ', externalButton);
-  assert.ok(extSpace.defaultPrevented, 'Space on external button while video active controls playback');
-  assert.equal(video.paused, true, 'Video paused');
-  video.paused = false;
+  assert.equal(extSpace.defaultPrevented, false,
+    'Space on external button must NOT be prevented by PlaybackEngine');
+  assert.equal(extSpace.stopped, false,
+    'Space on external button must NOT stop propagation');
+  assert.equal(video.paused, false,
+    'Space on external button must NOT toggle video playback');
+
+  // Simulate browser keyup firing click
+  if (!extSpace.defaultPrevented) onSubscribeClick();
+  assert.equal(subscribeActivated, true, 'External button successfully activated via native click');
+  assert.equal(video.paused, false, 'Video remains playing uninterrupted');
+
+  // External link (<a>)
+  const externalLink = {
+    tagName: 'A',
+    closest: () => null
+  };
+  const linkSpace = fakeWindow.send(' ', externalLink);
+  assert.equal(linkSpace.defaultPrevented, false, 'Space on external link must not toggle video playback');
 
   // --------------------------------------------------------------------------
-  // Test 10: System modifiers and native YouTube keys (C, T, I)
+  // Test 10: System modifiers, IME, Chapters, and Native YouTube keys (C, T, I)
   // --------------------------------------------------------------------------
   for (const modifier of ['ctrlKey', 'altKey', 'metaKey']) {
     const event = fakeWindow.send(' ', { tagName: 'DIV' }, { [modifier]: true });
     assert.ok(!event.defaultPrevented, `${modifier} must not be intercepted`);
   }
 
+  // Ctrl+ArrowLeft/Right for YouTube native chapter navigation
+  const ctrlArrowRight = fakeWindow.send('ArrowRight', { tagName: 'DIV' }, { ctrlKey: true });
+  assert.equal(ctrlArrowRight.defaultPrevented, false,
+    'Ctrl+ArrowRight must NOT be claimed as 5s seek, preserving YouTube native chapters');
+  const ctrlArrowLeft = fakeWindow.send('ArrowLeft', { tagName: 'DIV' }, { ctrlKey: true });
+  assert.equal(ctrlArrowLeft.defaultPrevented, false,
+    'Ctrl+ArrowLeft must NOT be claimed as 5s seek, preserving YouTube native chapters');
+
+  // Native YouTube keys
   for (const nativeKey of ['c', 't', 'i', 'T']) {
     const event = fakeWindow.send(nativeKey);
     assert.ok(!event.defaultPrevented && !event.stopped,
       `${nativeKey} must reach native YouTube and theater listener`);
   }
 
+  // Escape key handling
+  let exitFsCalled = false;
+  engine.exitFullscreen = () => { exitFsCalled = true; engine.state.isFullscreen = false; };
+  engine.state.isFullscreen = true;
+  const escFs = fakeWindow.send('Escape');
+  assert.ok(escFs.defaultPrevented, 'Escape in fullscreen claims event and exits fullscreen');
+  assert.equal(exitFsCalled, true, 'exitFullscreen was invoked on Escape in fullscreen');
+  assert.equal(engine.state.isFullscreen, false, 'Fullscreen exited');
+
+  const escNormal = fakeWindow.send('Escape');
+  assert.equal(escNormal.defaultPrevented, false,
+    'Escape outside fullscreen does not claim event and never closes window');
+
   // --------------------------------------------------------------------------
-  // Test 11: Reinjection defense & Single-listener invariant
+  // Test 11: Removal of A/D/S/B Collisions & Preserving Mod Features via UI
+  //
+  // Bare letter keys A, D, S, B are NOT intercepted globally by PlaybackEngine
+  // or AppUI, resolving collisions with YouTube web (e.g. 360-degree video panning).
+  // Mod features (AdBlock, DeArrow, SponsorBlock, Settings) remain fully operative via UI.
+  // --------------------------------------------------------------------------
+  appUI = new AppUI();
+  appUI.mount();
+  for (const bareKey of ['a', 'A', 'd', 'D', 's', 'S', 'b', 'B']) {
+    const evt = fakeWindow.send(bareKey);
+    assert.equal(evt.defaultPrevented, false,
+      `Bare key '${bareKey}' must NOT be defaultPrevented globally (no collision with YouTube)`);
+    assert.equal(evt.stopped, false,
+      `Bare key '${bareKey}' must NOT be stopped (passes to YouTube)`);
+  }
+
+  // Search shortcut '/' still focuses search bar
+  let searchFocused = false;
+  appUI.navBar.focusSearch = () => { searchFocused = true; };
+  const slashEvt = fakeWindow.send('/');
+  assert.ok(slashEvt.defaultPrevented, "Key '/' must focus search bar");
+  assert.equal(searchFocused, true, 'Search bar focused on /');
+
+  // Mod features remain fully controllable via UI / configuration modal
+  assert.ok(appUI.settingsModal, 'Settings modal is available in UI');
+  appUI.settingsModal.open();
+  assert.equal(appUI.settingsModal.isOpen, true, 'Settings modal opens via UI');
+
+  // Escape closes settings modal
+  const escModal = fakeWindow.send('Escape');
+  assert.ok(escModal.defaultPrevented, 'Escape closes open settings modal');
+  assert.equal(appUI.settingsModal.element.classList.contains('tt-modal-open'), false,
+    'Settings modal animation class removed immediately on Escape');
+
+  // --------------------------------------------------------------------------
+  // Test 12: Reinjection defense & Single-listener invariant
   // --------------------------------------------------------------------------
   const engine2 = new PlaybackEngine({ rememberPreferences: false });
   engine2.bindVideoElement(video);
@@ -392,7 +606,7 @@ try {
   engine2.dispose();
 
   // --------------------------------------------------------------------------
-  // Test 12: SPA Navigation & Live video element reconnection
+  // Test 13: SPA Navigation & Live video element reconnection
   // --------------------------------------------------------------------------
   const engine3 = new PlaybackEngine({ rememberPreferences: false });
   const oldVideo = createVideo('video-old');
@@ -410,7 +624,7 @@ try {
   engine3.dispose();
 
   // --------------------------------------------------------------------------
-  // Test 13: Clean Teardown / Dispose
+  // Test 14: Clean Teardown / Dispose
   // --------------------------------------------------------------------------
   engine.dispose();
   assert.ok(!fakeWindow.listeners.some(x => x.type === 'keydown' && x.capture),
@@ -418,9 +632,15 @@ try {
   assert.equal(fakeWindow.__tt_playback_keydown__, undefined,
     'Dispose must clean up global listener reference');
 
+  appUI.unmount();
+
   console.log('PASS keyboard playback suite: single +/-5s, stable clock, Space/K on player controls, focus, modifiers, repeat, reinjection & dispose');
 } finally {
   engine?.dispose();
+  appUI?.unmount();
   if (originalWindow === undefined) delete globalThis.window; else globalThis.window = originalWindow;
   if (originalDocument === undefined) delete globalThis.document; else globalThis.document = originalDocument;
+  if (originalLocalStorage === undefined) delete globalThis.localStorage; else globalThis.localStorage = originalLocalStorage;
+  if (originalRAF === undefined) delete globalThis.requestAnimationFrame; else globalThis.requestAnimationFrame = originalRAF;
+  if (originalCAF === undefined) delete globalThis.cancelAnimationFrame; else globalThis.cancelAnimationFrame = originalCAF;
 }

@@ -41,6 +41,7 @@ namespace TizenTubeWindows
         public bool FloatingVisualProbe { get; set; } = false;
         public bool FloatingCycleProbe { get; set; } = false;
         public bool FloatingFixtureProbe { get; set; } = false;
+        public bool FloatingLifecycleProbe { get; set; } = false;
         public bool AdblockExtensionProbe { get; set; } = false;
         public bool AdguardExtensionProbe { get; set; } = false;
         public bool TheaterUserProbe { get; set; } = false;
@@ -136,6 +137,11 @@ namespace TizenTubeWindows
                 }
                 else if (arg == "--floating-cycle-probe")
                 {
+                    options.FloatingCycleProbe = true;
+                }
+                else if (arg == "--floating-lifecycle-probe")
+                {
+                    options.FloatingLifecycleProbe = true;
                     options.FloatingCycleProbe = true;
                 }
                 else if (arg == "--floating-fixture-probe")
@@ -2125,6 +2131,15 @@ namespace TizenTubeWindows
                     "theater:f?f.hasAttribute('theater'):false," +
                     "floating:floatDiag?.active??false," +
                     "playerInBody:floatDiag?.playerInBody??false," +
+                    "restoreButtonPresent:floatDiag?.restoreButtonPresent??false," +
+                    "closeButtonPresent:floatDiag?.closeButtonPresent??false," +
+                    "rewindButtonPresent:floatDiag?.rewindButtonPresent??false," +
+                    "playButtonPresent:floatDiag?.playButtonPresent??false," +
+                    "forwardButtonPresent:floatDiag?.forwardButtonPresent??false," +
+                    "progressBarPresent:floatDiag?.progressBarPresent??false," +
+                    "timeDisplayPresent:floatDiag?.timeDisplayPresent??false," +
+                    "volumeButtonPresent:floatDiag?.volumeButtonPresent??false," +
+                    "overlayPresent:floatDiag?.overlayPresent??false," +
                     "fullscreen:!!(document.fullscreenElement || document.querySelector('.ytp-fullscreen') || window.__ttNativeFullscreen)};})()";
 
                 var pixelChecks = new Dictionary<string, string>();
@@ -2197,6 +2212,42 @@ namespace TizenTubeWindows
                 File.WriteAllText(Path.Combine(folder, "cycle-05-return.json"), s5);
                 await CaptureVisibleFixtureAsync("05-return");
 
+                // 6. Test floating seek & restore lifecycle
+                await ToggleFloatingWindowAsync(false);
+                await Task.Delay(1200);
+                await webView.CoreWebView2.ExecuteScriptAsync("window.__ttFloating?.seek(10)");
+                await Task.Delay(500);
+                string s6 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
+                File.WriteAllText(Path.Combine(folder, "cycle-06-floating-seek.json"), s6);
+                await CaptureVisibleFixtureAsync("06-floating-seek");
+
+                // Restore via native toolbar button (exercising the native click path)
+                if (navigationToolbar != null)
+                    navigationToolbar.InvokeRestoreFloatingForProbe();
+                else
+                    await ToggleFloatingWindowAsync(true);
+                await Task.Delay(1200);
+                string s7 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
+                File.WriteAllText(Path.Combine(folder, "cycle-07-restore.json"), s7);
+                await CaptureVisibleFixtureAsync("07-restore");
+
+                // 7. Test floating dismiss / close lifecycle via native toolbar close button
+                await ToggleFloatingWindowAsync(false);
+                await Task.Delay(1200);
+                if (navigationToolbar != null)
+                    navigationToolbar.InvokeCloseForProbe();
+                else
+                    await DismissFloatingWindowAsync();
+                await Task.Delay(1200);
+                string s8 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
+                File.WriteAllText(Path.Combine(folder, "cycle-08-dismiss.json"), s8);
+
+                // Recover window from minimized state to leave application in clean state
+                WindowState = FormWindowState.Normal;
+                await Task.Delay(500);
+                string s9 = await webView.CoreWebView2.ExecuteScriptAsync(probeScript);
+                File.WriteAllText(Path.Combine(folder, "cycle-09-recovered.json"), s9);
+
                 var summary = new {
                     success = true,
                     pixelChecks = pixelChecks,
@@ -2204,7 +2255,11 @@ namespace TizenTubeWindows
                     step2_theater = System.Text.Json.JsonDocument.Parse(s2).RootElement,
                     step3_floating = System.Text.Json.JsonDocument.Parse(s3).RootElement,
                     step4_fullscreen = System.Text.Json.JsonDocument.Parse(s4).RootElement,
-                    step5_return = System.Text.Json.JsonDocument.Parse(s5).RootElement
+                    step5_return = System.Text.Json.JsonDocument.Parse(s5).RootElement,
+                    step6_floating_seek = System.Text.Json.JsonDocument.Parse(s6).RootElement,
+                    step7_restore = System.Text.Json.JsonDocument.Parse(s7).RootElement,
+                    step8_dismiss = System.Text.Json.JsonDocument.Parse(s8).RootElement,
+                    step9_recovered = System.Text.Json.JsonDocument.Parse(s9).RootElement
                 };
                 File.WriteAllText(Path.Combine(folder, "floating-cycle-summary.json"),
                     System.Text.Json.JsonSerializer.Serialize(summary));
@@ -2557,6 +2612,40 @@ namespace TizenTubeWindows
             }
         }
 
+        private async Task DismissFloatingWindowAsync()
+        {
+            if (webView?.CoreWebView2 == null || options.HeadlessMode) return;
+            if (!nativeFloatingActive)
+            {
+                Close();
+                return;
+            }
+
+            try
+            {
+                // Pause playback in WebView2 and clean up floating player DOM elements
+                await webView.CoreWebView2.ExecuteScriptAsync(
+                    "(() => { try { " +
+                    "  const v = document.querySelector('video.html5-main-video'); " +
+                    "  if (v && !v.paused && typeof v.pause === 'function') v.pause(); " +
+                    "  window.__ttFloating?.stop(true); " +
+                    "} catch(_) {} })()");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("[Host Dismiss Floating] Pause failed: " + ex.Message);
+            }
+
+            // Restore normal form bounds, borders, and top-most state
+            SetNativeFloatingWindow(false);
+
+            // In our single-form architecture, minimize to taskbar rather than killing
+            // the process. This dismisses the floating window cleanly and silences
+            // audio while keeping the application session alive and 1-click recoverable.
+            WindowState = FormWindowState.Minimized;
+            Console.WriteLine("[Host Floating] Floating playback dismissed: paused and minimized to taskbar.");
+        }
+
         private void SetupIpcBridge()
         {
             // Bidirectional IPC between Host and Web client
@@ -2568,14 +2657,22 @@ namespace TizenTubeWindows
                     if (string.IsNullOrEmpty(json)) return;
 
                     if (json.Contains("\"channel\":\"window:toggle-floating\"") ||
-                        json.Contains("\"channel\":\"window:restore-floating\""))
+                        json.Contains("\"channel\":\"window:restore-floating\"") ||
+                        json.Contains("\"channel\":\"window:close-floating\""))
                     {
                         if (Uri.TryCreate(args.Source, UriKind.Absolute, out Uri source) &&
                             source.Scheme == "https" &&
-                            (source.Host == "www.youtube.com" || source.Host == "youtube.com"))
+                            (source.Host == "www.youtube.com" || source.Host == "youtube.com" || source.Host == "tizentube-fixture.invalid"))
                         {
-                            bool restore = json.Contains("\"channel\":\"window:restore-floating\"");
-                            _ = ToggleFloatingWindowAsync(restore);
+                            if (json.Contains("\"channel\":\"window:close-floating\""))
+                            {
+                                _ = DismissFloatingWindowAsync();
+                            }
+                            else
+                            {
+                                bool restore = json.Contains("\"channel\":\"window:restore-floating\"");
+                                _ = ToggleFloatingWindowAsync(restore);
+                            }
                         }
                         return;
                     }
@@ -3085,7 +3182,7 @@ namespace TizenTubeWindows
             if (nativeFloatingActive && e.CloseReason == CloseReason.UserClosing)
             {
                 e.Cancel = true;
-                _ = ToggleFloatingWindowAsync(true); // X restores the regular app, does not stop video.
+                _ = DismissFloatingWindowAsync(); // X pauses playback and minimizes to taskbar, keeping app recoverable.
                 return;
             }
             DisableFocusedFloatingHotkey();

@@ -253,6 +253,9 @@ export class AppUI {
 
     // 6. Global Keyboard Shortcuts
     this._onKeyDown = (e) => {
+      // Do not steal IME composition or system / browser combinations
+      if (e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return;
+
       const tag = e.target.tagName ? e.target.tagName.toLowerCase() : '';
       if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) {
         if (e.key === 'Escape' && typeof e.target.blur === 'function') {
@@ -263,62 +266,17 @@ export class AppUI {
 
       resetCursorIdle();
 
-      if (e.key === 's' || e.key === 'S') {
-        e.preventDefault();
-        if (this.settingsModal.isOpen) {
-          this.settingsModal.close();
-        } else {
-          this.settingsModal.open();
-        }
-      } else if (e.key === '/') {
+      // '/' focuses search bar; Escape closes open modal.
+      // Bare A/D/S/B are NOT intercepted globally to avoid collisions with YouTube web
+      // (e.g. 360-degree video panning with A/D, YouTube hotkeys).
+      // Mod features (AdBlock, DeArrow, SponsorBlock, Settings) remain fully accessible via UI.
+      if (e.key === '/') {
         e.preventDefault();
         this.navBar.focusSearch();
       } else if (e.key === 'Escape') {
         if (this.settingsModal.isOpen) {
           e.preventDefault();
           this.settingsModal.close();
-        }
-      } else if (e.key === 'b' || e.key === 'B') {
-        if (this.sponsorblock) {
-          e.preventDefault();
-          const next = !this.sponsorblock.options.autoSkip;
-          this.sponsorblock.setAutoSkip(next);
-          this.settingsModal.settings.sponsorblock.autoSkip = next;
-          this.savePreferences(this.settingsModal.getSettings());
-          this.toasts.show({
-            title: 'SponsorBlock',
-            message: `Auto-Skip: ${next ? 'Enabled' : 'Disabled'}`,
-            color: '#00d400',
-            durationMs: 2000
-          });
-        }
-      } else if (e.key === 'a' || e.key === 'A') {
-        if (this.adblock) {
-          e.preventDefault();
-          const next = !this.adblock.options.enabled;
-          this.adblock.setEnabled(next);
-          this.settingsModal.settings.adblock.enabled = next;
-          this.savePreferences(this.settingsModal.getSettings());
-          this.toasts.show({
-            title: 'AdBlock',
-            message: `Ad Blocking: ${next ? 'Enabled' : 'Disabled'}`,
-            color: '#3ea6ff',
-            durationMs: 2000
-          });
-        }
-      } else if (e.key === 'd' || e.key === 'D') {
-        if (this.dearrow) {
-          e.preventDefault();
-          const next = !this.dearrow.options.enabled;
-          this.dearrow.setEnabled(next);
-          this.settingsModal.settings.dearrow.enabled = next;
-          this.savePreferences(this.settingsModal.getSettings());
-          this.toasts.show({
-            title: 'DeArrow',
-            message: `Anti-Clickbait: ${next ? 'Enabled' : 'Disabled'}`,
-            color: '#ff9900',
-            durationMs: 2000
-          });
         }
       }
     };

@@ -184,6 +184,8 @@ namespace TizenTubeWindows
                     reload.Visible = false;
                     maximize.Visible = false;
                     restoreFloating.Visible = true;
+                    close.AccessibleName = "Cerrar reproducción flotante";
+                    tips.SetToolTip(close, "Cerrar reproducción flotante (pausa y minimiza)");
                     appIcon.Location = new Point(6, 10);
                     title.Location = new Point(28, 2);
                     title.Height = 34;
@@ -195,6 +197,8 @@ namespace TizenTubeWindows
                     reload.Visible = true;
                     maximize.Visible = true;
                     restoreFloating.Visible = false;
+                    close.AccessibleName = "Cerrar";
+                    tips.SetToolTip(close, "Cerrar");
                     appIcon.Location = new Point(9, 10);
                     title.Location = new Point(116, 2);
                     title.Height = 34;
@@ -240,6 +244,7 @@ namespace TizenTubeWindows
         public void InvokeMaximizeForProbe() { maximize.PerformAction(); }
         public void InvokeMinimizeForProbe() { minimize.PerformAction(); }
         public void InvokeRestoreFloatingForProbe() { restoreFloating.PerformAction(); }
+        public void InvokeCloseForProbe() { close.PerformAction(); }
 
         protected override void Dispose(bool disposing)
         {

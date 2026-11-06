@@ -207,6 +207,23 @@ async function runTests() {
     assert.deepStrictEqual(receivedPayload, { foo: 'bar', number: 42 });
   });
 
+  test('IpcBridge dispatches floating lifecycle channels (restore vs close)', () => {
+    const ipc = new IpcBridge();
+    const received = [];
+
+    ipc.on('window:restore-floating', (payload, msg) => {
+      received.push(msg.channel);
+    });
+    ipc.on('window:close-floating', (payload, msg) => {
+      received.push(msg.channel);
+    });
+
+    ipc.send('window:restore-floating');
+    ipc.send('window:close-floating');
+
+    assert.deepStrictEqual(received, ['window:restore-floating', 'window:close-floating']);
+  });
+
   // 9. ModLoader Coordination Tests
   test('ModLoader coordinates modules and wires timeline skip events', () => {
     const ml = new ModLoader({
