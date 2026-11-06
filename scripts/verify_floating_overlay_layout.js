@@ -7,6 +7,70 @@
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import assert from 'node:assert/strict';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import path from 'node:path';
+import fs from 'node:fs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+function resolveChromeBinary() {
+  if (process.env.CHROME_BIN && fs.existsSync(process.env.CHROME_BIN)) {
+    return process.env.CHROME_BIN;
+  }
+  if (process.env.CHROME_PATH && fs.existsSync(process.env.CHROME_PATH)) {
+    return process.env.CHROME_PATH;
+  }
+
+  const isWindows = process.platform === 'win32';
+  const isMac = process.platform === 'darwin';
+
+  if (isWindows) {
+    const prefixes = [
+      process.env.PROGRAMFILES,
+      process.env['PROGRAMFILES(X86)'],
+      process.env.LOCALAPPDATA
+    ].filter(Boolean);
+
+    const relativePaths = [
+      path.join('Google', 'Chrome', 'Application', 'chrome.exe'),
+      path.join('Microsoft', 'Edge', 'Application', 'msedge.exe'),
+      path.join('Chromium', 'Application', 'chrome.exe')
+    ];
+
+    for (const prefix of prefixes) {
+      for (const rel of relativePaths) {
+        const full = path.join(prefix, rel);
+        if (fs.existsSync(full)) return full;
+      }
+    }
+    return 'chrome.exe';
+  }
+
+  if (isMac) {
+    const macCandidates = [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium'
+    ];
+    for (const cand of macCandidates) {
+      if (fs.existsSync(cand)) return cand;
+    }
+    return 'google-chrome';
+  }
+
+  // Linux / POSIX candidates
+  const linuxCandidates = [
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser'
+  ];
+  for (const cand of linuxCandidates) {
+    if (fs.existsSync(cand)) return cand;
+  }
+  return 'google-chrome';
+}
 
 async function fetchJson(url) {
   return new Promise((resolve, reject) => {
@@ -21,9 +85,14 @@ async function fetchJson(url) {
 }
 
 async function runLayoutVerification() {
-  console.log('>>> Launching Chrome Headless with CDP for Floating Overlay Empirical Layout Verification...');
-  const fixtureUrl = 'file:///srv/orbital/workspaces/tizentube-windows/scripts/fixture_floating_overlay.html';
-  const chrome = spawn('/usr/bin/google-chrome', [
+  const chromeBin = resolveChromeBinary();
+  const fixturePath = path.resolve(__dirname, 'fixture_floating_overlay.html');
+  const fixtureUrl = pathToFileURL(fixturePath).href;
+
+  console.log(`>>> Launching browser CDP (${chromeBin}) for Floating Overlay Empirical Layout Verification...`);
+  console.log(`    Fixture URL: ${fixtureUrl}`);
+
+  const chrome = spawn(chromeBin, [
     '--headless',
     '--no-sandbox',
     '--disable-gpu',
@@ -31,6 +100,11 @@ async function runLayoutVerification() {
     '--window-size=540,320',
     fixtureUrl
   ]);
+
+  let spawnError = null;
+  chrome.on('error', (err) => {
+    spawnError = err;
+  });
 
   let killed = false;
   const cleanup = () => {
@@ -45,6 +119,9 @@ async function runLayoutVerification() {
     // Wait for CDP port to open
     let targets = null;
     for (let i = 0; i < 20; i++) {
+      if (spawnError) {
+        throw new Error(`Failed to spawn browser (${chromeBin}): ${spawnError.message}`);
+      }
       await new Promise(r => setTimeout(r, 200));
       try {
         targets = await fetchJson('http://127.0.0.1:9225/json');

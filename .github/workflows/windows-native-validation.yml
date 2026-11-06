@@ -41,6 +41,7 @@ jobs:
       - name: Verify JavaScript modules, runtime, and unit tests
         shell: pwsh
         run: |
+          # Use npm.cmd on Windows pwsh to bypass PowerShell script execution policy restrictions on npm.ps1
           npm.cmd test
           node scripts/test_native_adblock_extension.js
           node scripts/test_external_ad_skip_helper.js
