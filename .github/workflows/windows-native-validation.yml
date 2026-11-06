@@ -347,8 +347,8 @@ jobs:
           # Verify installer execution, installation, and installed binary
           $testInstallDir = Join-Path $env:RUNNER_TEMP 'tt-test-install'
           Write-Host "[INFO] Testing installer silent installation to $testInstallDir..."
-          & $setupExe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="$testInstallDir"
-          if ($LASTEXITCODE -ne 0) { throw 'INSTALLER_EXECUTION_FAILED' }
+          $installerProc = Start-Process -FilePath (Resolve-Path $setupExe).Path -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$testInstallDir") -Wait -PassThru
+          if ($installerProc.ExitCode -ne 0) { throw "INSTALLER_EXECUTION_FAILED_$($installerProc.ExitCode)" }
           $installedHost = Join-Path $testInstallDir 'TizenTubeHost.exe'
           if (!(Test-Path $installedHost)) { throw 'INSTALLED_HOST_MISSING' }
           Write-Host "[INFO] Testing installed host smoke test..."
