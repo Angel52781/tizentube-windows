@@ -10,6 +10,7 @@
  */
 
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import assert from 'assert';
 import { execSync } from 'child_process';
@@ -19,6 +20,7 @@ import { validateTelemetryFile, generateSimulatedTelemetry } from './measure_pro
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
+const tmpDir = os.tmpdir();
 
 console.log('Running TizenTube Windows Process Telemetry Tests...\n');
 
@@ -40,7 +42,7 @@ function it(desc, fn) {
 
 // 1. Simulation and Validation of Complete Process Tree Telemetry
 it('Simulated telemetry payload validates successfully with multi-process tracking', () => {
-  const tempFile = path.join(rootDir, 'scripts', 'temp_sim_telemetry.json');
+  const tempFile = path.join(tmpDir, 'temp_sim_telemetry.json');
   try {
     const simData = generateSimulatedTelemetry('automated-test');
     fs.writeFileSync(tempFile, JSON.stringify(simData, null, 2), 'utf8');
@@ -57,7 +59,7 @@ it('Simulated telemetry payload validates successfully with multi-process tracki
 
 // 2. Error Detection for Incomplete or Invalid Telemetry
 it('Validator rejects telemetry missing Private Memory metrics', () => {
-  const tempFile = path.join(rootDir, 'scripts', 'temp_invalid_priv.json');
+  const tempFile = path.join(tmpDir, 'temp_invalid_priv.json');
   try {
     const badData = {
       timestamp: new Date().toISOString(),
@@ -83,7 +85,7 @@ it('Validator rejects telemetry missing Private Memory metrics', () => {
 });
 
 it('Validator rejects telemetry with non-positive memory values', () => {
-  const tempFile = path.join(rootDir, 'scripts', 'temp_zero_mem.json');
+  const tempFile = path.join(tmpDir, 'temp_zero_mem.json');
   try {
     const badData = {
       timestamp: new Date().toISOString(),
@@ -109,7 +111,7 @@ it('Validator rejects telemetry with non-positive memory values', () => {
 });
 
 it('Validator rejects telemetry missing numeric process PID', () => {
-  const tempFile = path.join(rootDir, 'scripts', 'temp_bad_pid.json');
+  const tempFile = path.join(tmpDir, 'temp_bad_pid.json');
   try {
     const badData = {
       timestamp: new Date().toISOString(),
@@ -191,7 +193,7 @@ it('C# Host telemetry JSON format matches schema and contains required fields', 
     ]
   };
 
-  const tempFile = path.join(rootDir, 'scripts', 'temp_host_json.json');
+  const tempFile = path.join(tmpDir, 'temp_host_json.json');
   try {
     fs.writeFileSync(tempFile, JSON.stringify(hostJsonPayload, null, 2), 'utf8');
     const res = validateTelemetryFile(tempFile);
@@ -222,7 +224,7 @@ it('Confirms mathematical distinction between Working Set and Private Memory', (
 // 5. CLI Execution & Tooling Verification
 it('CLI --simulate generates valid telemetry artifact on disk', () => {
   const cliScript = path.join(rootDir, 'scripts', 'measure_process_telemetry.js');
-  const tempSimPath = path.join(rootDir, 'scripts', 'temp_cli_sim.json');
+  const tempSimPath = path.join(tmpDir, 'temp_cli_sim.json');
   try {
     const out = execSync(`node "${cliScript}" --simulate "${tempSimPath}"`, { encoding: 'utf8' });
     assert.ok(out.includes('[OK]'), 'Must report OK message on simulation');
@@ -237,8 +239,8 @@ it('CLI --simulate generates valid telemetry artifact on disk', () => {
 
 it('CLI --validate exits with code 0 on valid artifact and code 1 on invalid artifact', () => {
   const cliScript = path.join(rootDir, 'scripts', 'measure_process_telemetry.js');
-  const tempValidPath = path.join(rootDir, 'scripts', 'temp_cli_valid.json');
-  const tempInvalidPath = path.join(rootDir, 'scripts', 'temp_cli_invalid.json');
+  const tempValidPath = path.join(tmpDir, 'temp_cli_valid.json');
+  const tempInvalidPath = path.join(tmpDir, 'temp_cli_invalid.json');
 
   try {
     const sim = generateSimulatedTelemetry('cli-valid-test');

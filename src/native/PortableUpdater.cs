@@ -37,7 +37,7 @@ namespace TizenTubeWindows
                         return asmVer.Revision;
                 }
                 catch { }
-                return 27; // fallback para preview.27
+                return 28; // fallback para preview.28
             }
         }
         private const string Api = "https://api.github.com/repos/Angel52781/tizentube-windows/releases?per_page=30";
@@ -411,7 +411,7 @@ namespace TizenTubeWindows
                     if (key != null)
                     {
                         key.SetValue("DisplayName", "TizenTube");
-                        key.SetValue("DisplayVersion", "0.1.0-preview.27");
+                        key.SetValue("DisplayVersion", "0.1.0-preview.28");
                         key.SetValue("Publisher", "TizenTube Windows Contributors");
                         key.SetValue("DisplayIcon", exePath);
                         key.SetValue("InstallLocation", installDir);

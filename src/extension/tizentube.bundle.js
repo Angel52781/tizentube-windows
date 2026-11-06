@@ -360,6 +360,12 @@ class PlaybackEngine {
    * Toggle play / pause state.
    */
   togglePlay() {
+    if (!this.videoElement || (typeof document !== 'undefined' && this.videoElement.isConnected === false)) {
+      if (typeof document !== 'undefined') {
+        const video = document.querySelector?.('video.html5-main-video') || document.querySelector?.('video');
+        if (video) this.bindVideoElement(video);
+      }
+    }
     if (!this.videoElement) return false;
     if (this.videoElement.paused) {
       this.videoElement.play();
@@ -376,6 +382,12 @@ class PlaybackEngine {
    * @param {number} deltaSeconds Positive or negative offset in seconds
    */
   seekBy(deltaSeconds) {
+    if (!this.videoElement || (typeof document !== 'undefined' && this.videoElement.isConnected === false)) {
+      if (typeof document !== 'undefined') {
+        const video = document.querySelector?.('video.html5-main-video') || document.querySelector?.('video');
+        if (video) this.bindVideoElement(video);
+      }
+    }
     if (!this.videoElement) {
       this.state.currentTime = Math.max(0, this.state.currentTime + deltaSeconds);
       return this.state.currentTime;
@@ -392,6 +404,12 @@ class PlaybackEngine {
    * @param {number} targetSeconds 
    */
   seekTo(targetSeconds) {
+    if (!this.videoElement || (typeof document !== 'undefined' && this.videoElement.isConnected === false)) {
+      if (typeof document !== 'undefined') {
+        const video = document.querySelector?.('video.html5-main-video') || document.querySelector?.('video');
+        if (video) this.bindVideoElement(video);
+      }
+    }
     if (!this.videoElement) {
       this.state.currentTime = Math.max(0, targetSeconds);
       return this.state.currentTime;
@@ -545,25 +563,38 @@ class PlaybackEngine {
     if (typeof window === 'undefined') return;
     if (this._onKeyDown) return;
 
+    // Reinjection defense: unregister lingering handler from previous instance on this window
+    if (window.__tt_playback_keydown__) {
+      try {
+        window.removeEventListener('keydown', window.__tt_playback_keydown__, true);
+      } catch (_) {}
+    }
+
     this._onKeyDown = (e) => {
-      // Do not steal browser/system combinations, text entry, or the focused
-      // buttons and sliders. Keyboard controls belong to video playback only.
+      // Do not steal IME composition or system / browser combinations
+      if (e.isComposing || e.ctrlKey || e.altKey || e.metaKey) return;
+
       const target = e.target;
       const tag = target?.tagName?.toLowerCase?.() || '';
-      if (e.isComposing || e.ctrlKey || e.altKey || e.metaKey ||
-          target?.isContentEditable ||
-          ['input', 'textarea', 'select', 'button', 'a'].includes(tag) ||
-          target?.closest?.('[contenteditable], [role="textbox"], [role="button"], [role="slider"], [role="menuitem"]')) {
+
+      // Text entry fields and menus must never be intercepted (search bar, comments, text inputs, settings menus)
+      if (target?.isContentEditable ||
+          ['input', 'textarea', 'select'].includes(tag) ||
+          target?.closest?.('[contenteditable], [role="textbox"], [role="menuitem"], [role="menuitemcheckbox"], [role="menuitemradio"], [role="menu"], .ytp-menuitem, .ytp-panel-menu')) {
         return;
       }
 
-      // YouTube also handles these keys. Capture *before* its document/player
-      // handlers; preventDefault alone at window bubble phase is too late
-      // and causes a 5s seek followed by another 5s seek (visible as 10s).
-      const claim = () => {
-        e.preventDefault();
-        e.stopImmediatePropagation?.();
-      };
+      // Modal dialogs (e.g. SettingsModal): user is configuring settings, not controlling playback
+      if (target?.closest?.('[role="dialog"], .tt-modal, #tizentube-settings-modal')) {
+        return;
+      }
+
+      // Check whether target belongs to the video player or player controls
+      const isPlayerTarget = !target || ['body', 'video'].includes(tag) ||
+        Boolean(target?.closest?.('#movie_player, .html5-video-player, video, .tt-player-controls, .tt-btn, .ytp-button')) ||
+        Boolean(target?.classList?.contains?.('ytp-button') || target?.classList?.contains?.('tt-btn')) ||
+        Boolean(typeof target?.className === 'string' && target.className.includes('ytp-'));
+
       const key = e.code === 'Space' ? ' ' : e.key;
 
       // Native YouTube owns C (captions), T (theater) and I (miniplayer).
@@ -571,12 +602,32 @@ class PlaybackEngine {
       // choice. Consuming these at window capture would break that contract.
       if (typeof key === 'string' && ['c', 't', 'i'].includes(key.toLowerCase())) return;
 
+      // Unrelated external buttons/links (outside player):
+      // Intercept Space and K for playback control; leave navigation keys (arrows, Tab)
+      // to the focused external control.
+      if (!isPlayerTarget && ['button', 'a'].includes(tag)) {
+        if (![' ', 'Spacebar', 'k', 'K'].includes(key)) {
+          return;
+        }
+      }
+
+      // YouTube also handles these keys. Capture *before* its document/player
+      // handlers; preventDefault alone at window bubble phase is too late
+      // and causes a 5s seek followed by another 5s seek (visible as 10s).
+      // Crucially, preventDefault on Space prevents the browser from synthesizing
+      // a secondary 'click' event on focused player buttons (<button> / [role="button"]),
+      // which previously caused Space to toggle play and immediately resume.
+      const claim = () => {
+        e.preventDefault();
+        e.stopImmediatePropagation?.();
+      };
+
       // Percent jumps (0-9)
       if (key >= '0' && key <= '9') {
         claim();
         const percent = parseInt(key, 10) * 10;
-        const target = (this.state.duration || 0) * (percent / 100);
-        this.seekTo(target);
+        const targetTime = (this.state.duration || 0) * (percent / 100);
+        this.seekTo(targetTime);
         return;
       }
 
@@ -599,12 +650,22 @@ class PlaybackEngine {
           this.seekBy(10);
           break;
         case 'ArrowLeft':
-          claim();
-          this.seekBy(-5);
+          if (target?.closest?.('.ytp-volume-slider')) {
+            claim();
+            this.adjustVolume(-5);
+          } else {
+            claim();
+            this.seekBy(-5);
+          }
           break;
         case 'ArrowRight':
-          claim();
-          this.seekBy(5);
+          if (target?.closest?.('.ytp-volume-slider')) {
+            claim();
+            this.adjustVolume(5);
+          } else {
+            claim();
+            this.seekBy(5);
+          }
           break;
         case 'Home':
           claim();
@@ -650,6 +711,7 @@ class PlaybackEngine {
       }
     };
 
+    window.__tt_playback_keydown__ = this._onKeyDown;
     window.addEventListener('keydown', this._onKeyDown, true);
   }
 
@@ -745,6 +807,9 @@ class PlaybackEngine {
     }
     if (typeof window !== 'undefined' && this._onKeyDown) {
       window.removeEventListener('keydown', this._onKeyDown, true);
+      if (window.__tt_playback_keydown__ === this._onKeyDown) {
+        delete window.__tt_playback_keydown__;
+      }
       this._onKeyDown = null;
     }
     if (typeof document !== 'undefined' && this._onFsChange) {
@@ -5034,6 +5099,9 @@ class ModLoader {
 
   // Auto-bootstrap runtime
   try {
+    if (window.__TIZENTUBE_LOADER__ && typeof window.__TIZENTUBE_LOADER__.dispose === 'function') {
+      try { window.__TIZENTUBE_LOADER__.dispose(); } catch (_) {}
+    }
     const config = window.__TIZENTUBE_CONFIG__ || {};
     const loader = new ModLoader(config);
     loader.bootstrap();

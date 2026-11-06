@@ -254,6 +254,9 @@ export class ModLoader {
 
 // Auto-bootstrap in browser/WebView context
 if (typeof window !== 'undefined') {
+  if (window.__TIZENTUBE_LOADER__ && typeof window.__TIZENTUBE_LOADER__.dispose === 'function') {
+    try { window.__TIZENTUBE_LOADER__.dispose(); } catch (_) {}
+  }
   const loader = new ModLoader(window.__TIZENTUBE_CONFIG__ || {});
   loader.bootstrap();
   window.__TIZENTUBE_LOADER__ = loader;

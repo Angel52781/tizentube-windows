@@ -102,6 +102,9 @@ export function buildBundle() {
 
   // Auto-bootstrap runtime
   try {
+    if (window.__TIZENTUBE_LOADER__ && typeof window.__TIZENTUBE_LOADER__.dispose === 'function') {
+      try { window.__TIZENTUBE_LOADER__.dispose(); } catch (_) {}
+    }
     const config = window.__TIZENTUBE_CONFIG__ || {};
     const loader = new ModLoader(config);
     loader.bootstrap();
