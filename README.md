@@ -2,11 +2,13 @@
 
 <img src="assets/TizenTube.png" alt="Logo oficial de TizenTube Windows" width="160">
 
-[![Descargar Instalador TizenTube Windows](https://img.shields.io/badge/%E2%AC%87%20INSTALADOR-Windows%2010%2F11%20x64-087fca?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.29/TizenTube-Setup-x64.exe)
+[![Descargar Instalador TizenTube Windows](https://img.shields.io/badge/%E2%AC%87%20INSTALADOR-Windows%2010%2F11%20x64-087fca?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.31/TizenTube-Setup-x64.exe)
 
-**[Descargar Instalador recomendado (`TizenTube-Setup-x64.exe`)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.29/TizenTube-Setup-x64.exe)** · **[Descargar ZIP portable](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.29/TizenTube-Windows-x64-v0.1.0-preview.29.zip)** · [Instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md) · [Todas las versiones](https://github.com/Angel52781/tizentube-windows/releases)
+**[Descargar Instalador recomendado (`TizenTube-Setup-x64.exe`)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.31/TizenTube-Setup-x64.exe)** · **[Descargar ZIP portable](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.31/TizenTube-Windows-x64-v0.1.0-preview.31.zip)** · [Instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md) · [Todas las versiones](https://github.com/Angel52781/tizentube-windows/releases)
 
 > **¿Windows muestra «Windows protegió su PC»?** Esta versión de prueba todavía no tiene firma digital de un editor reconocido. Consulta [por qué sucede y las opciones de firma](docs/SMARTSCREEN_AND_SIGNING.md). No implica por sí mismo que el archivo sea malicioso; verifica siempre el origen y el SHA-256.
+
+**Preview.31 — icono oficial compatible con Windows:** corrige el formato ICO que WinForms interpretaba incorrectamente en previews anteriores. El ejecutable utiliza el icono embebido y los accesos directos referencian el archivo ICO instalado. Se comprobó el mismo diseño en una PC Windows real y en [Windows CI](https://github.com/Angel52781/tizentube-windows/actions/runs/42435340478), incluyendo pruebas de instalación. [Instalador y notas de preview.31](https://github.com/Angel52781/tizentube-windows/releases/tag/v0.1.0-preview.31).
 
 **Preview.29 — nuevo logo oficial:** actualiza el icono de la aplicación y del instalador con el diseño elegido para TizenTube Windows (ventana turquesa, reproducción blanca y segmento coral). Compilado y validado en [Windows CI](https://github.com/Angel52781/tizentube-windows/actions/runs/42432671171). Se mantiene el comportamiento funcional de preview.28; la reproducción de YouTube en una PC de usuario sigue pendiente de comprobación. [Notas y descargas de preview.29](https://github.com/Angel52781/tizentube-windows/releases/tag/v0.1.0-preview.29).
 
@@ -18,7 +20,7 @@
 - **Saneamiento de velocidad de reproducción**: evita que aceleraciones temporales (como mantener pulsado el reproductor de YouTube para 2x o saltos de anuncios de versiones anteriores) sobreescriban permanentemente las preferencias; sanea cualquier velocidad almacenada mayor a 2x restableciéndola a 1x.
 - **Soporte CLI nativo**: comandos `--install` y `--uninstall` para gestión sin dependencias externas.
 
-**Descarga para probar en Windows 10/11 x64:** [Releases / v0.1.0-preview.29](https://github.com/Angel52781/tizentube-windows/releases/tag/v0.1.0-preview.29). Usar el instalador recomendado o descargar el ZIP de **Assets**, extraer toda la carpeta y ejecutar `TizenTubeHost.exe`. Ver [instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md).
+**Descarga para probar en Windows 10/11 x64:** [Releases / v0.1.0-preview.31](https://github.com/Angel52781/tizentube-windows/releases/tag/v0.1.0-preview.31). Usar el instalador recomendado o descargar el ZIP de **Assets**, extraer toda la carpeta y ejecutar `TizenTubeHost.exe`. Ver [instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md).
 
 **Actualizaciones desde preview.16:** se desarrollan cambios en main y se publican Releases verificadas para que la app las detecte sin consultar GitHub Actions. Preview.15 tenía un defecto al iniciar el proceso auxiliar de sustitución y necesitará una última actualización manual a preview.16; después, el nuevo proceso auxiliar se comprueba en Windows junto a sus dependencias .NET.
 
