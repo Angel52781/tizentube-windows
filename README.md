@@ -1,5 +1,7 @@
 # TizenTube Windows
 
+<img src="assets/TizenTube.png" alt="Logo oficial de TizenTube Windows" width="160">
+
 [![Descargar Instalador TizenTube Windows](https://img.shields.io/badge/%E2%AC%87%20INSTALADOR-Windows%2010%2F11%20x64-087fca?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.28/TizenTube-Setup-x64.exe)
 
 **[Descargar Instalador recomendado (`TizenTube-Setup-x64.exe`)](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.28/TizenTube-Setup-x64.exe)** · **[Descargar ZIP portable](https://github.com/Angel52781/tizentube-windows/releases/download/v0.1.0-preview.28/TizenTube-Windows-x64-v0.1.0-preview.28.zip)** · [Instrucciones de instalación](docs/GETTING_STARTED_WINDOWS.md) · [Todas las versiones](https://github.com/Angel52781/tizentube-windows/releases)

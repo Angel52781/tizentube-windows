@@ -1,5 +1,28 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="TizenTube player window icon">
-  <rect x="6" y="6" width="244" height="244" rx="54" fill="#111928"/>
-  <rect x="61" y="69" width="134" height="118" rx="29" fill="none" stroke="#23cbd4" stroke-width="15"/>
-  <path d="M108 97 L164 128 L108 159 Z" fill="#f8fbff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="TizenTube official video player and sponsor-skip icon">
+  <title>TizenTube Windows</title>
+  <!-- Editable vector interpretation of the approved image. The precise raster
+       used by Windows icon packaging is assets/TizenTube.png. -->
+  <defs>
+    <linearGradient id="background" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#09182f"/>
+      <stop offset=".65" stop-color="#0b1b39"/>
+      <stop offset="1" stop-color="#07162e"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="0" x2=".9" y1="1" y2="0">
+      <stop offset="0" stop-color="#27cbd0"/>
+      <stop offset="1" stop-color="#2be1d1"/>
+    </linearGradient>
+    <linearGradient id="coral" x1="0" x2="1">
+      <stop offset="0" stop-color="#ff7662"/>
+      <stop offset="1" stop-color="#ff6654"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="220" fill="url(#background)"/>
+  <path d="M 436,688 H 209 C 179,688 158,665 158,637 V 283 C 158,254 181,231 210,231 H 812 C 842,231 865,255 865,284 V 637 C 865,667 843,688 813,688 H 524 V 767"
+        fill="none" stroke="url(#cyan)" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 453,334 C 438,325 422,332 422,351 V 559 C 422,579 437,587 454,576 L 621,470 C 636,461 635,450 620,441 Z"
+        fill="#ffffff"/>
+  <rect x="133" y="766" width="146" height="53" rx="14" fill="url(#cyan)"/>
+  <rect x="327" y="766" width="222" height="53" rx="16" fill="url(#coral)"/>
+  <rect x="597" y="766" width="294" height="53" rx="14" fill="url(#cyan)"/>
 </svg>
