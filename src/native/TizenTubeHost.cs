@@ -411,8 +411,19 @@ namespace TizenTubeWindows
             this.StartPosition = FormStartPosition.CenterScreen;
             this.MaximizedBounds = Screen.PrimaryScreen.WorkingArea;
             this.BackColor = Color.FromArgb(15, 15, 15);
-            try { this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; }
-            catch { this.Icon = SystemIcons.Application; }
+            // Avoid the Windows Shell's per-path icon cache for the window and
+            // taskbar: always load the approved icon embedded in the managed
+            // assembly, including when launched as a lone single-file EXE.
+            try
+            {
+                using (var source = typeof(MainWindow).Assembly.GetManifestResourceStream("TizenTube.OfficialIcon"))
+                {
+                    this.Icon = source != null
+                        ? new Icon(source, new Size(32, 32))
+                        : Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application;
+                }
+            }
+            catch { this.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application; }
 
             if (this.options.HeadlessMode)
             {

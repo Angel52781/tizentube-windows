@@ -4,7 +4,7 @@
 
 [Setup]
 AppName=TizenTube
-AppVersion=0.1.0-preview.29
+AppVersion=0.1.0-preview.30
 AppPublisher=TizenTube Windows Contributors
 AppPublisherURL=https://github.com/Angel52781/tizentube-windows
 AppSupportURL=https://github.com/Angel52781/tizentube-windows/issues
@@ -18,7 +18,7 @@ SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=lowest
 SetupIconFile=..\assets\TizenTube.ico
-UninstallDisplayIcon={app}\TizenTubeHost.exe
+UninstallDisplayIcon={app}\TizenTube.ico
 DisableProgramGroupPage=yes
 CloseApplications=yes
 RestartApplications=no
@@ -34,9 +34,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "..\release-out\TizenTube-Windows-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\TizenTube"; Filename: "{app}\TizenTubeHost.exe"
+Name: "{group}\TizenTube"; Filename: "{app}\TizenTubeHost.exe"; IconFilename: "{app}\TizenTube.ico"
 Name: "{group}\{cm:UninstallProgram,TizenTube}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\TizenTube"; Filename: "{app}\TizenTubeHost.exe"; Tasks: desktopicon
+Name: "{autodesktop}\TizenTube"; Filename: "{app}\TizenTubeHost.exe"; IconFilename: "{app}\TizenTube.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\TizenTubeHost.exe"; Description: "{cm:LaunchProgram,TizenTube}"; Flags: nowait postinstall skipifsilent
