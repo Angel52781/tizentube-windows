@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the official Windows .ico from the selected TizenTube PNG.
+"""Build a Windows-native BMP-backed .ico from the selected TizenTube PNG.
 
 The approved artwork lives in assets/TizenTube.png (1024px, transparent
 corners). Use only the Python standard library so every Windows CI runner
@@ -116,17 +116,30 @@ def resize_rgba(width, height, pixels, size):
     return bytes(out)
 
 
-def encode_png(size, pixels):
-    scanlines = b"".join(
-        b"\0" + pixels[y * size * 4:(y + 1) * size * 4]
-        for y in range(size)
+def encode_icon_bitmap(size, pixels):
+    """Write a Win32 icon DIB (BGRA XOR + padded 1-bit AND mask).
+
+    PNG-only ICO entries looked correct in PE resources but were misread by
+    System.Drawing.Icon(Stream) on the user's Windows PC. The standard DIB
+    layout is supported by both WinForms and Explorer.
+    """
+    xor = bytearray()
+    and_mask = bytearray()
+    mask_stride = ((size + 31) // 32) * 4
+    for y in range(size - 1, -1, -1):
+        mask_row = bytearray(mask_stride)
+        for x in range(size):
+            o = (y * size + x) * 4
+            r, g, b, a = pixels[o:o + 4]
+            xor.extend((b, g, r, a))
+            if a < 128:
+                mask_row[x // 8] |= 1 << (7 - x % 8)
+        and_mask.extend(mask_row)
+    header = struct.pack(
+        '<IiiHHIIiiII', 40, size, size * 2, 1, 32, 0,
+        len(xor), 0, 0, 0, 0,
     )
-    return (
-        b"\x89PNG\r\n\x1a\n"
-        + png_chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0))
-        + png_chunk(b"IDAT", zlib.compress(scanlines, 9))
-        + png_chunk(b"IEND", b"")
-    )
+    return header + xor + and_mask
 
 
 def main():
@@ -134,7 +147,10 @@ def main():
     width, height, pixels = decode_png(source.read_bytes())
     if (width, height) != (1024, 1024):
         raise ValueError("Official icon source must be 1024x1024")
-    images = [encode_png(size, resize_rgba(width, height, pixels, size)) for size in SIZES]
+    images = [
+        encode_icon_bitmap(size, resize_rgba(width, height, pixels, size))
+        for size in SIZES
+    ]
     offset = 6 + len(images) * 16
     table = []
     for size, png in zip(SIZES, images):

@@ -3,6 +3,7 @@ evidence/*.json
 evidence/*.txt
 node_modules/
 assets/*.ico
+!assets/TizenTube.ico
 .ci-staging/
 dist/
 out/

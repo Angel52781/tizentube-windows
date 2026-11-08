@@ -22,12 +22,15 @@ for i in range(count):
     )
     width, height = width or 256, height or 256
     assert width == height and depth == 32
-    assert data[offset:offset + 8] == b'\x89PNG\r\n\x1a\n'
-    assert struct.unpack_from('>II', data, offset + 16) == (width, height)
-    icon_w, icon_h, icon_rgba = decode_png(data[offset:offset + length])
-    assert (icon_w, icon_h) == (width, height)
-    assert icon_rgba[3] == 0  # Transparent corners are preserved.
-    assert icon_rgba[(height // 2 * width + width // 2) * 4 + 3] == 255
+    bitmap = data[offset:offset + length]
+    assert struct.unpack_from('<IiiHHI', bitmap) == (40, width, height * 2, 1, 32, 0)
+    mask_stride = ((width + 31) // 32) * 4
+    assert len(bitmap) == 40 + width * height * 4 + height * mask_stride
+    # BGRA pixels run bottom-up, with a separate AND transparency mask.
+    assert bitmap[40 + (height - 1) * width * 4 + 3] == 0
+    middle = 40 + ((height - 1) - height // 2) * width * 4 + width // 2 * 4
+    assert bitmap[middle + 3] == 255
+    assert bitmap[40 + width * height * 4] & 0x80  # bottom-left transparent
     sizes.append(width)
 assert sizes == [16, 24, 32, 48, 64, 128, 256], sizes
 print('PASS approved icon source, vector companion, transparent corners and 7 DPI sizes')
