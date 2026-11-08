@@ -217,14 +217,41 @@ try {
   fakeWindow.send(' ', progressBar);
   assert.equal(video.paused, false, 'Second Space on progress bar resumes video');
 
+  // Regression: the real browser emits keydown AND keyup for every Space.
+  // If the injected engine claims only keydown, YouTube may act on the
+  // unclaimed release and reverse the state while its overlay animates.
+  let nativeReleaseToggles = 0;
+  fakeWindow.addEventListener('keyup', e => {
+    if ((e.key === ' ' || e.code === 'Space') && e.target?.tagName !== 'BUTTON') {
+      nativeReleaseToggles++;
+      video.paused ? video.play() : video.pause();
+    }
+  });
+  const spaceCycleDown = fakeWindow.send(' ', { tagName: 'DIV' });
+  const repeatedSpace = fakeWindow.send(' ', { tagName: 'DIV' }, { repeat: true });
+  const spaceCycleUp = fakeWindow.send(' ', { tagName: 'DIV' }, { type: 'keyup' });
+  assert.equal(video.paused, true, 'One complete Space press must pause exactly once');
+  assert.ok(spaceCycleDown.defaultPrevented && repeatedSpace.defaultPrevented &&
+    spaceCycleUp.defaultPrevented && spaceCycleUp.stopped,
+    'Every keydown repeat and matching keyup must be claimed when TizenTube owns Space');
+  assert.equal(nativeReleaseToggles, 0,
+    'Native YouTube keyup must not reverse the injected Space toggle');
+  fakeWindow.send(' ', { tagName: 'DIV' });
+  fakeWindow.send(' ', { tagName: 'DIV' }, { type: 'keyup' });
+  assert.equal(video.paused, false, 'Second complete Space press must resume exactly once');
+
   // --------------------------------------------------------------------------
   // Test 3: K toggles play/pause reliably everywhere (except text fields)
   // --------------------------------------------------------------------------
   const pauseK = fakeWindow.send('k');
   assert.equal(video.paused, true, 'K must pause video');
   assert.ok(pauseK.defaultPrevented && pauseK.stopped);
+  const releaseK = fakeWindow.send('k', { tagName: 'DIV' }, { type: 'keyup' });
+  assert.ok(releaseK.defaultPrevented && releaseK.stopped,
+    'K release must not reach competing player handlers');
   const resumeK = fakeWindow.send('K');
   assert.equal(video.paused, false, 'K must resume video');
+  fakeWindow.send('K', { tagName: 'DIV' }, { type: 'keyup' });
 
   // --------------------------------------------------------------------------
   // Test 4: J/L 10-second jumps
@@ -338,6 +365,9 @@ try {
     'Space on play button must NOT be defaultPrevented on keydown, enabling browser native keyup click');
   assert.equal(video.paused, false,
     'Space keydown alone must NOT toggle video playback on button, preventing duplicate keydown+click toggle');
+  const playRelease = fakeWindow.send(' ', playButton, { type: 'keyup' });
+  assert.equal(playRelease.defaultPrevented, false,
+    'Focused play button must retain native Space keyup click activation');
 
   // Chromium fires 'click' on keyup when defaultPrevented is false
   if (!playSpace.defaultPrevented) playClick();
@@ -362,6 +392,9 @@ try {
     'Space on mute button must NOT be intercepted with preventDefault');
   assert.equal(video.paused, false,
     'Space on mute button must NEVER pause or toggle playback! (Fixes 661423e regression)');
+  const muteRelease = fakeWindow.send(' ', muteButton, { type: 'keyup' });
+  assert.equal(muteRelease.defaultPrevented, false,
+    'Focused mute button must retain native Space keyup click activation');
 
   // Keyup default action fires mute click
   if (!muteSpace.defaultPrevented) muteClick();
@@ -390,6 +423,8 @@ try {
   const ttClick = () => { ttClicks++; video.paused = !video.paused; };
   const ttSpace = fakeWindow.send(' ', ttPlayButton);
   assert.equal(ttSpace.defaultPrevented, false, 'Space on TT button allows browser native click');
+  assert.equal(fakeWindow.send(' ', ttPlayButton, { type: 'keyup' }).defaultPrevented, false,
+    'TizenTube player buttons must also retain native Space click activation');
   if (!ttSpace.defaultPrevented) ttClick();
   assert.equal(ttClicks, 1);
 
@@ -600,9 +635,13 @@ try {
   engine2.bindVideoElement(video);
   const captureListeners = fakeWindow.listeners.filter(x => x.type === 'keydown' && x.capture);
   assert.equal(captureListeners.length, 1, 'Reinjection must replace previous keydown handler, not accumulate');
+  assert.equal(fakeWindow.listeners.filter(x => x.type === 'keyup' && x.capture).length, 1,
+    'Reinjection must replace previous keyup handler, not accumulate');
   video.paused = false;
   fakeWindow.send(' ');
+  const reinjectedRelease = fakeWindow.send(' ', { tagName: 'DIV' }, { type: 'keyup' });
   assert.equal(video.paused, true, 'Re-injected engine must pause exactly once without double-action');
+  assert.ok(reinjectedRelease.defaultPrevented, 'Re-injected engine must also claim Space keyup');
   engine2.dispose();
 
   // --------------------------------------------------------------------------
@@ -629,8 +668,12 @@ try {
   engine.dispose();
   assert.ok(!fakeWindow.listeners.some(x => x.type === 'keydown' && x.capture),
     'Dispose must remove capture listener with matching capture option');
+  assert.ok(!fakeWindow.listeners.some(x => x.type === 'keyup' && x.capture),
+    'Dispose must remove keyup capture listener with matching capture option');
   assert.equal(fakeWindow.__tt_playback_keydown__, undefined,
     'Dispose must clean up global listener reference');
+  assert.equal(fakeWindow.__tt_playback_keyup__, undefined,
+    'Dispose must clean up global keyup listener reference');
 
   appUI.unmount();
 

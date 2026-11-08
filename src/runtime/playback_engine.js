@@ -22,6 +22,8 @@ export class PlaybackEngine {
     this._videoListeners = [];
     this._onFsChange = null;
     this._onKeyDown = null;
+    this._onKeyUp = null;
+    this._claimedPlayPauseKeys = new Set();
     this._onDomReady = null;
     this.state = {
       isPlaying: false,
@@ -416,6 +418,24 @@ export class PlaybackEngine {
         window.removeEventListener('keydown', window.__tt_playback_keydown__, true);
       } catch (_) {}
     }
+    if (window.__tt_playback_keyup__) {
+      try {
+        window.removeEventListener('keyup', window.__tt_playback_keyup__, true);
+      } catch (_) {}
+    }
+
+    // YouTube can also react to the release of Space/K. Claim the full
+    // physical keystroke only when this engine handled its keydown.
+    // Focused buttons remain native: their Space keyup must synthesize click.
+    this._onKeyUp = (e) => {
+      const key = e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar'
+        ? 'Space'
+        : e.code === 'KeyK' || e.key === 'k' || e.key === 'K' ? 'KeyK' : null;
+      if (!key || !this._claimedPlayPauseKeys.has(key)) return;
+      this._claimedPlayPauseKeys.delete(key);
+      e.preventDefault();
+      e.stopImmediatePropagation?.();
+    };
 
     this._onKeyDown = (e) => {
       // Do not steal IME composition or system / browser combinations
@@ -500,12 +520,14 @@ export class PlaybackEngine {
           // Claim event so YouTube bubble listeners don't double-toggle,
           // and filter e.repeat so holding Space does not oscillate.
           claim();
+          this._claimedPlayPauseKeys.add('Space');
           if (!e.repeat) this.togglePlay();
           break;
         case 'k':
         case 'K':
           // Universal play/pause hotkey: claims event, filters e.repeat
           claim();
+          this._claimedPlayPauseKeys.add('KeyK');
           if (!e.repeat) this.togglePlay();
           break;
         case 'j':
@@ -606,7 +628,9 @@ export class PlaybackEngine {
     };
 
     window.__tt_playback_keydown__ = this._onKeyDown;
+    window.__tt_playback_keyup__ = this._onKeyUp;
     window.addEventListener('keydown', this._onKeyDown, true);
+    window.addEventListener('keyup', this._onKeyUp, true);
   }
 
   /**
@@ -706,6 +730,14 @@ export class PlaybackEngine {
       }
       this._onKeyDown = null;
     }
+    if (typeof window !== 'undefined' && this._onKeyUp) {
+      window.removeEventListener('keyup', this._onKeyUp, true);
+      if (window.__tt_playback_keyup__ === this._onKeyUp) {
+        delete window.__tt_playback_keyup__;
+      }
+      this._onKeyUp = null;
+    }
+    this._claimedPlayPauseKeys.clear();
     if (typeof document !== 'undefined' && this._onFsChange) {
       document.removeEventListener('fullscreenchange', this._onFsChange);
       document.removeEventListener('webkitfullscreenchange', this._onFsChange);

@@ -37,7 +37,7 @@ namespace TizenTubeWindows
                         return asmVer.Revision;
                 }
                 catch { }
-                return 31; // fallback para preview.31
+                return 32; // fallback para preview.32
             }
         }
         private const string Api = "https://api.github.com/repos/Angel52781/tizentube-windows/releases?per_page=30";
@@ -411,7 +411,7 @@ namespace TizenTubeWindows
                     if (key != null)
                     {
                         key.SetValue("DisplayName", "TizenTube");
-                        key.SetValue("DisplayVersion", "0.1.0-preview.31");
+                        key.SetValue("DisplayVersion", "0.1.0-preview.32");
                         key.SetValue("Publisher", "TizenTube Windows Contributors");
                         // Shell icon caching is keyed by exe path; use the
                         // published sidecar ICO so upgrades refresh the logo.
